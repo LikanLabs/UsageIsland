@@ -4,7 +4,8 @@ import Foundation
 
 @MainActor
 public final class AppModel: ObservableObject {
-    @Published public var providers: [ProviderUsage] = []
+    @Published public private(set) var providers: [ProviderUsage]
+    @Published public private(set) var connectionStates: [ProviderID: ProviderConnectionState]
     @Published public var agents: [AgentSession] = []
     @Published public var leftMode: WingPresentationMode = .compact
     @Published public var rightMode: WingPresentationMode = .compact
@@ -14,12 +15,59 @@ public final class AppModel: ObservableObject {
     @Published public var isPulsePresented = false
     @Published public var expandedProvider: ProviderID?
     @Published public var scenario: DemoScenario = .normal
-    @Published public var lastUpdatedAt = Date.now
+    @Published public private(set) var lastUpdatedAt: Date
     @Published public var adaptiveSpacingIsTrusted = false
     @Published public var islandIsVisible = true
 
-    public init() {
-        applyScenario(.normal)
+    private let clock: any UsageClock
+    private var providerAdapters: [any UsageProvider]
+    private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
+
+    public convenience init(
+        providerAdapters: [any UsageProvider],
+        clock: any UsageClock,
+        initialSnapshots: [UsageSnapshot],
+        initialScenario: DemoScenario = .normal
+    ) throws(AppModelConfigurationError) {
+        let configuration = try Self.validateConfiguration(
+            providerAdapters: providerAdapters,
+            initialSnapshots: initialSnapshots
+        )
+        self.init(
+            configuration: configuration,
+            clock: clock,
+            initialScenario: initialScenario
+        )
+    }
+
+    private init(
+        configuration: ValidatedAppModelConfiguration,
+        clock: any UsageClock,
+        initialScenario: DemoScenario
+    ) {
+        self.clock = clock
+        providerAdapters = configuration.providerAdapters
+        providers = configuration.initialSnapshots
+        connectionStates = configuration.connectionStates
+        scenario = initialScenario
+        lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
+        applyAgents(for: initialScenario)
+    }
+
+    static func empty(
+        clock: any UsageClock,
+        initialScenario: DemoScenario = .normal
+    ) -> AppModel {
+        AppModel(
+            configuration: ValidatedAppModelConfiguration(
+                providerAdapters: [],
+                initialSnapshots: [],
+                connectionStates: [:]
+            ),
+            clock: clock,
+            initialScenario: initialScenario
+        )
     }
 
     public var prioritizedProviders: [ProviderUsage] {
@@ -41,6 +89,10 @@ public final class AppModel: ObservableObject {
             ?? agents.first { $0.status == .waitingForInput }
     }
 
+    public func freshness(for provider: ProviderID) -> DataFreshness {
+        providers.first(where: { $0.id == provider })?.freshness ?? .unavailable
+    }
+
     public func togglePulse() {
         isPulseOpen.toggle()
     }
@@ -55,49 +107,200 @@ public final class AppModel: ObservableObject {
     }
 
     public func applyScenario(_ scenario: DemoScenario) {
+        let snapshots = DemoUsageProvider.snapshots(for: scenario, clock: clock)
+        let adapters = DemoUsageProvider.providerAdapters(for: scenario, clock: clock)
+        guard let configuration = try? Self.validateConfiguration(
+            providerAdapters: adapters,
+            initialSnapshots: snapshots
+        ) else {
+            return
+        }
+
+        invalidateRefresh()
         self.scenario = scenario
-        let now = Date.now
+        providerAdapters = configuration.providerAdapters
+        providers = configuration.initialSnapshots
+        connectionStates = configuration.connectionStates
+        lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
+        applyAgents(for: scenario)
+    }
+
+    public func refreshUsage() async {
+        invalidateRefresh()
+        let generation = refreshGeneration
+        let adaptersToRefresh = providerAdapters
+
+        var connectingStates = connectionStates
+        for adapter in adaptersToRefresh {
+            connectingStates[adapter.id] = .connecting
+        }
+        connectionStates = connectingStates
+
+        let task = Task { [weak self] in
+            let results = await Self.fetchAll(adaptersToRefresh)
+            guard !Task.isCancelled, let self else { return }
+            self.applyRefreshResults(results, generation: generation)
+        }
+        refreshTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+
+        if Task.isCancelled {
+            cancelRefreshIfCurrent(generation)
+        }
+    }
+
+    public func stop() {
+        invalidateRefresh()
+        connectionStates = connectionStates.mapValues { _ in .disconnected }
+    }
+
+    private func applyAgents(for scenario: DemoScenario) {
+        let now = clock.now()
 
         switch scenario {
         case .normal:
-            providers = [
-                .init(id: .claude, shortWindow: .init(remainingPercent: 72, resetsAt: now.addingTimeInterval(3.3 * 3600)), weeklyRemainingPercent: 43, weeklySpend: 8.42, freshness: .fresh, isCurrentlyActive: true),
-                .init(id: .codex, shortWindow: .init(remainingPercent: 48, resetsAt: now.addingTimeInterval(2.1 * 3600)), weeklyRemainingPercent: 61, weeklySpend: 6.20, freshness: .fresh, isCurrentlyActive: true),
-                .init(id: .openCodeGo, shortWindow: .init(remainingPercent: 91, resetsAt: now.addingTimeInterval(4.6 * 3600)), weeklyRemainingPercent: 88, weeklySpend: 3.98, freshness: .fresh, isCurrentlyActive: false)
-            ]
             agents = [
-                .init(provider: .claude, status: .running, project: "api-server", source: "Terminal"),
-                .init(provider: .codex, status: .running, project: "usage-island", source: "Paseo")
+                .init(provider: .claude, status: .running, project: "api-server", source: "Terminal", updatedAt: now),
+                .init(provider: .codex, status: .running, project: "usage-island", source: "Paseo", updatedAt: now)
             ]
 
         case .critical:
-            providers = [
-                .init(id: .claude, shortWindow: .init(remainingPercent: 8, resetsAt: now.addingTimeInterval(42 * 60)), weeklyRemainingPercent: 29, weeklySpend: 16.12, freshness: .fresh, isCurrentlyActive: true),
-                .init(id: .codex, shortWindow: .init(remainingPercent: 64, resetsAt: now.addingTimeInterval(3.8 * 3600)), weeklyRemainingPercent: 70, weeklySpend: 4.80, freshness: .fresh, isCurrentlyActive: false),
-                .init(id: .openCodeGo, shortWindow: .init(remainingPercent: 87, resetsAt: now.addingTimeInterval(4.1 * 3600)), weeklyRemainingPercent: 81, weeklySpend: 4.10, freshness: .fresh, isCurrentlyActive: false)
+            agents = [
+                .init(provider: .claude, status: .running, project: "agent-runtime", source: "Orca", updatedAt: now)
             ]
-            agents = [.init(provider: .claude, status: .running, project: "agent-runtime", source: "Orca")]
 
         case .waiting:
-            providers = [
-                .init(id: .claude, shortWindow: .init(remainingPercent: 68, resetsAt: now.addingTimeInterval(3 * 3600)), weeklyRemainingPercent: 44, weeklySpend: 8.90, freshness: .fresh, isCurrentlyActive: false),
-                .init(id: .codex, shortWindow: .init(remainingPercent: 41, resetsAt: now.addingTimeInterval(1.8 * 3600)), weeklyRemainingPercent: 59, weeklySpend: 7.10, freshness: .fresh, isCurrentlyActive: true),
-                .init(id: .openCodeGo, shortWindow: .init(remainingPercent: 90, resetsAt: now.addingTimeInterval(4.5 * 3600)), weeklyRemainingPercent: 86, weeklySpend: 3.98, freshness: .fresh, isCurrentlyActive: false)
-            ]
             agents = [
-                .init(provider: .claude, status: .running, project: "api-server", source: "Paseo"),
-                .init(provider: .codex, status: .waitingForApproval, project: "usage-island", source: "Orca")
+                .init(provider: .claude, status: .running, project: "api-server", source: "Paseo", updatedAt: now),
+                .init(provider: .codex, status: .waitingForApproval, project: "usage-island", source: "Orca", updatedAt: now)
             ]
 
         case .error:
-            providers = [
-                .init(id: .claude, shortWindow: .init(remainingPercent: 70, resetsAt: now.addingTimeInterval(3.2 * 3600)), weeklyRemainingPercent: 42, weeklySpend: 9.10, freshness: .stale, isCurrentlyActive: false),
-                .init(id: .codex, shortWindow: .init(remainingPercent: 48, resetsAt: now.addingTimeInterval(2.1 * 3600)), weeklyRemainingPercent: 61, weeklySpend: 6.20, freshness: .fresh, isCurrentlyActive: false),
-                .init(id: .openCodeGo, shortWindow: .init(remainingPercent: 91, resetsAt: now.addingTimeInterval(4.6 * 3600)), weeklyRemainingPercent: 88, weeklySpend: 3.98, freshness: .unavailable, isCurrentlyActive: false)
+            agents = [
+                .init(provider: .codex, status: .failed, project: "usage-island", source: "Paseo", updatedAt: now)
             ]
-            agents = [.init(provider: .codex, status: .failed, project: "usage-island", source: "Paseo")]
+        }
+    }
+
+    private func invalidateRefresh() {
+        refreshGeneration &+= 1
+        refreshTask?.cancel()
+        refreshTask = nil
+    }
+
+    private func cancelRefreshIfCurrent(_ generation: Int) {
+        guard generation == refreshGeneration else { return }
+        invalidateRefresh()
+        connectionStates = connectionStates.mapValues { state in
+            state == .connecting ? .disconnected : state
+        }
+    }
+
+    private func applyRefreshResults(_ results: [RefreshResult], generation: Int) {
+        guard generation == refreshGeneration else { return }
+
+        var snapshotsByID: [ProviderID: UsageSnapshot] = [:]
+        for snapshot in providers {
+            snapshotsByID[snapshot.id] = snapshot
+        }
+        var newConnectionStates = connectionStates
+        var successfulCapturedDates: [Date] = []
+
+        for result in results {
+            if let snapshot = result.snapshot {
+                snapshotsByID[result.id] = snapshot
+                newConnectionStates[result.id] = .connected
+                successfulCapturedDates.append(snapshot.capturedAt)
+            } else if var previous = snapshotsByID[result.id] {
+                previous.freshness = .stale
+                snapshotsByID[result.id] = previous
+                newConnectionStates[result.id] = .failed
+            } else {
+                newConnectionStates[result.id] = .failed
+            }
         }
 
-        lastUpdatedAt = now
+        providers = ProviderID.allCases.compactMap { snapshotsByID[$0] }
+        connectionStates = newConnectionStates
+        if let newestCapture = successfulCapturedDates.max() {
+            lastUpdatedAt = newestCapture
+        }
+        refreshTask = nil
     }
+
+    private static func validateConfiguration(
+        providerAdapters: [any UsageProvider],
+        initialSnapshots: [UsageSnapshot]
+    ) throws(AppModelConfigurationError) -> ValidatedAppModelConfiguration {
+        var adapterIDs = Set<ProviderID>()
+        var connectionStates: [ProviderID: ProviderConnectionState] = [:]
+
+        for adapter in providerAdapters {
+            guard adapterIDs.insert(adapter.id).inserted else {
+                throw AppModelConfigurationError.duplicateProviderAdapter(adapter.id)
+            }
+            connectionStates[adapter.id] = .disconnected
+        }
+
+        var snapshotIDs = Set<ProviderID>()
+        for snapshot in initialSnapshots {
+            guard snapshotIDs.insert(snapshot.id).inserted else {
+                throw AppModelConfigurationError.duplicateInitialSnapshot(snapshot.id)
+            }
+            guard adapterIDs.contains(snapshot.id) else {
+                throw AppModelConfigurationError.snapshotWithoutAdapter(snapshot.id)
+            }
+            connectionStates[snapshot.id] = .connected
+        }
+
+        return ValidatedAppModelConfiguration(
+            providerAdapters: providerAdapters,
+            initialSnapshots: initialSnapshots,
+            connectionStates: connectionStates
+        )
+    }
+
+    nonisolated private static func fetchAll(
+        _ providerAdapters: [any UsageProvider]
+    ) async -> [RefreshResult] {
+        await withTaskGroup(of: RefreshResult.self) { group in
+            for adapter in providerAdapters {
+                group.addTask {
+                    do {
+                        let snapshot = try await adapter.fetchUsage()
+                        guard snapshot.id == adapter.id else {
+                            return RefreshResult(id: adapter.id, snapshot: nil)
+                        }
+                        return RefreshResult(
+                            id: adapter.id,
+                            snapshot: snapshot
+                        )
+                    } catch {
+                        return RefreshResult(id: adapter.id, snapshot: nil)
+                    }
+                }
+            }
+
+            var results: [RefreshResult] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+    }
+}
+
+private struct ValidatedAppModelConfiguration {
+    let providerAdapters: [any UsageProvider]
+    let initialSnapshots: [UsageSnapshot]
+    let connectionStates: [ProviderID: ProviderConnectionState]
+}
+
+private struct RefreshResult: Sendable {
+    let id: ProviderID
+    let snapshot: UsageSnapshot?
 }

@@ -11,7 +11,8 @@ final class UsageIslandPrototypeTests: XCTestCase {
       weeklyRemainingPercent: 60,
       weeklySpend: nil,
       freshness: .fresh,
-      isCurrentlyActive: true
+      isCurrentlyActive: true,
+      capturedAt: now
     )
     let critical = ProviderUsage(
       id: .claude,
@@ -19,7 +20,8 @@ final class UsageIslandPrototypeTests: XCTestCase {
       weeklyRemainingPercent: 30,
       weeklySpend: nil,
       freshness: .fresh,
-      isCurrentlyActive: false
+      isCurrentlyActive: false,
+      capturedAt: now
     )
 
     XCTAssertGreaterThan(critical.priorityScore, normal.priorityScore)

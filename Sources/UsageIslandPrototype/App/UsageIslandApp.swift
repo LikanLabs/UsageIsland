@@ -24,10 +24,41 @@ struct UsageIslandPrototypeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let model = AppModel()
+    private let model: AppModel
     private let occupancyService = MenuBarOccupancyService()
     private var islandController: IslandWindowController?
     private var beaconController: BeaconController?
+
+    override init() {
+        model = Self.makeDemoModel(clock: SystemUsageClock())
+        super.init()
+    }
+
+    static func makeDemoModel(clock: any UsageClock) -> AppModel {
+        makeModel(
+            providerAdapters: DemoUsageProvider.providerAdapters(for: .normal, clock: clock),
+            clock: clock,
+            initialSnapshots: DemoUsageProvider.snapshots(for: .normal, clock: clock)
+        )
+    }
+
+    static func makeModel(
+        providerAdapters: [any UsageProvider],
+        clock: any UsageClock,
+        initialSnapshots: [UsageSnapshot],
+        initialScenario: DemoScenario = .normal
+    ) -> AppModel {
+        do {
+            return try AppModel(
+                providerAdapters: providerAdapters,
+                clock: clock,
+                initialSnapshots: initialSnapshots,
+                initialScenario: initialScenario
+            )
+        } catch {
+            return AppModel.empty(clock: clock, initialScenario: initialScenario)
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -45,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        model.stop()
         islandController?.shutdown()
         islandController = nil
         beaconController = nil
