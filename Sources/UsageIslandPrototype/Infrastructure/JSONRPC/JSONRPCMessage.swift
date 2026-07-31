@@ -175,6 +175,17 @@ private struct IncomingEnvelope: Decodable {
 
     private struct RemoteError: Decodable {
         let code: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case code
+            case message
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            code = try container.decode(Int.self, forKey: .code)
+            _ = try container.decode(String.self, forKey: .message)
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -194,12 +205,22 @@ private struct IncomingEnvelope: Decodable {
         }
 
         let id = try container.decode(JSONRPCRequestID.self, forKey: .id)
-        if container.contains(.result) {
+        let hasResult = container.contains(.result)
+        let hasError = container.contains(.error)
+        guard !hasResult || !hasError else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "A response cannot contain both result and error"
+                )
+            )
+        }
+        if hasResult {
             let result = try container.decode(JSONValue.self, forKey: .result)
             message = .success(id: id, result: result)
             return
         }
-        if container.contains(.error) {
+        if hasError {
             let error = try container.decode(RemoteError.self, forKey: .error)
             message = .failure(id: id, code: error.code)
             return

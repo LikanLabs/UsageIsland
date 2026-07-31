@@ -12,6 +12,12 @@ public actor JSONRPCClient {
         let continuation: AsyncThrowingStream<JSONValue, Error>.Continuation
         var timeoutTask: Task<Void, Never>?
         var deliveryUncertain: Bool
+        var bufferedOutcome: RequestOutcome?
+    }
+
+    private enum RequestOutcome {
+        case success(JSONValue)
+        case failure(code: Int)
     }
 
     private let transport: any JSONRPCTransport
@@ -19,6 +25,9 @@ public actor JSONRPCClient {
     private let maximumLineSize: Int
     private let maximumRequestSize: Int
     private let maximumBufferedNotifications: Int
+    private let maximumPendingRequests: Int
+    private let defaultRequestTimeout: Duration
+    private let configurationError: JSONRPCError?
     private let notificationStream: AsyncThrowingStream<JSONRPCNotification, Error>
     private let notificationContinuation:
         AsyncThrowingStream<JSONRPCNotification, Error>.Continuation
@@ -27,25 +36,48 @@ public actor JSONRPCClient {
     private var lifecycleGeneration: UInt64 = 0
     private var nextRequestID: Int64 = 1
     private var pendingRequests: [JSONRPCRequestID: PendingRequest] = [:]
+    private var activeRequestSlots: Set<JSONRPCRequestID> = []
+    private var nextSendToken: UInt64 = 1
+    private var activeSendTokens: Set<UInt64> = []
+    private var activeNotificationSendTokens: Set<UInt64> = []
+    private var notificationSendErrors: [UInt64: JSONRPCError] = [:]
+    private var sendQuiescenceWaiters: [CheckedContinuation<Void, Never>] = []
+    private var quiescenceWaiters: [CheckedContinuation<Void, Never>] = []
     private var receiveBuffer = Data()
     private var readerTask: Task<Void, Never>?
     private var transportShutdownTask:
         Task<Result<Void, JSONRPCError>, Never>?
     private var transportShutdownComplete = false
 
+    /// Creates a client with bounded resource usage. The configured limit
+    /// defaults to 64 and independently bounds pending requests and active
+    /// notification sends, rejecting excess work immediately without waiting.
+    /// Every request and notification send uses a positive timeout, defaulting
+    /// to 30 seconds; there is no infinite-wait mode.
     public init(
         transport: any JSONRPCTransport,
         timeoutScheduler: any JSONRPCTimeoutScheduler =
             ContinuousJSONRPCTimeoutScheduler(),
         maximumLineSize: Int = 1_048_576,
         maximumRequestSize: Int = 1_048_576,
-        maximumBufferedNotifications: Int = 100
+        maximumBufferedNotifications: Int = 100,
+        maximumPendingRequests: Int = 64,
+        defaultRequestTimeout: Duration = .seconds(30)
     ) {
         self.transport = transport
         self.timeoutScheduler = timeoutScheduler
         self.maximumLineSize = max(1, maximumLineSize)
         self.maximumRequestSize = max(1, maximumRequestSize)
         self.maximumBufferedNotifications = max(1, maximumBufferedNotifications)
+        self.maximumPendingRequests = maximumPendingRequests
+        self.defaultRequestTimeout = defaultRequestTimeout
+        if maximumPendingRequests <= 0 {
+            configurationError = .invalidPendingRequestLimit
+        } else if defaultRequestTimeout <= .zero {
+            configurationError = .invalidRequestTimeout
+        } else {
+            configurationError = nil
+        }
         let pair = AsyncThrowingStream<JSONRPCNotification, Error>.makeStream(
             bufferingPolicy: .bufferingOldest(
                 max(1, maximumBufferedNotifications)
@@ -53,9 +85,21 @@ public actor JSONRPCClient {
         )
         notificationStream = pair.stream
         notificationContinuation = pair.continuation
+        notificationContinuation.onTermination = { [weak self] termination in
+            guard case .cancelled = termination else {
+                return
+            }
+            Task { [weak self] in
+                await self?.notificationStreamWasCancelled()
+            }
+        }
     }
 
     public func start() async throws {
+        if let configurationError {
+            close(with: configurationError)
+            throw configurationError
+        }
         try checkStartupCancellation()
         switch state {
         case .idle:
@@ -122,6 +166,9 @@ public actor JSONRPCClient {
         }
     }
 
+    /// Sends one request or rejects it immediately when the configured cap is
+    /// full. A nil timeout uses the configured positive default, which itself
+    /// defaults to 30 seconds; nil never means infinity.
     public func request(
         method: String,
         params: JSONValue? = nil,
@@ -135,6 +182,15 @@ public actor JSONRPCClient {
         guard !Task.isCancelled else {
             throw JSONRPCError.requestCancelled(.integer(0))
         }
+        let effectiveTimeout = timeout ?? defaultRequestTimeout
+        guard effectiveTimeout > .zero else {
+            throw JSONRPCError.invalidRequestTimeout
+        }
+        guard activeRequestSlots.count < maximumPendingRequests else {
+            throw JSONRPCError.pendingRequestLimitExceeded(
+                limit: maximumPendingRequests
+            )
+        }
 
         let id = try allocateRequestID()
         let data = try JSONRPCMessageCodec.encodeRequest(
@@ -146,6 +202,10 @@ public actor JSONRPCClient {
             throw JSONRPCError.requestTooLarge(limit: maximumRequestSize)
         }
         let pair = AsyncThrowingStream<JSONValue, Error>.makeStream()
+        activeRequestSlots.insert(id)
+        defer {
+            releaseRequestSlot(id)
+        }
 
         return try await withTaskCancellationHandler {
             guard !Task.isCancelled else {
@@ -154,11 +214,10 @@ public actor JSONRPCClient {
             pendingRequests[id] = PendingRequest(
                 continuation: pair.continuation,
                 timeoutTask: nil,
-                deliveryUncertain: false
+                deliveryUncertain: false,
+                bufferedOutcome: nil
             )
-            if let timeout {
-                installTimeout(for: id, duration: timeout)
-            }
+            installTimeout(for: id, duration: effectiveTimeout)
             if Task.isCancelled {
                 cancelRequest(id)
                 throw JSONRPCError.requestCancelled(id)
@@ -166,9 +225,17 @@ public actor JSONRPCClient {
 
             if pendingRequests[id] != nil {
                 pendingRequests[id]?.deliveryUncertain = true
+                let sendToken = beginActiveSend()
                 do {
                     try await transport.send(data)
+                    finishActiveSend(sendToken)
+                    if Task.isCancelled {
+                        cancelRequest(id)
+                    } else {
+                        settleRequestSend(id)
+                    }
                 } catch {
+                    finishActiveSend(sendToken)
                     if Task.isCancelled {
                         cancelRequest(id)
                     } else {
@@ -205,13 +272,18 @@ public actor JSONRPCClient {
         method: String,
         params: JSONValue? = nil
     ) async throws {
-        guard case .running = state else {
+        guard case .running(let generation) = state else {
             throw state == .idle
                 ? JSONRPCError.notInitialized
                 : JSONRPCError.transportClosed
         }
         guard !Task.isCancelled else {
             throw JSONRPCError.transportClosed
+        }
+        guard activeNotificationSendTokens.count < maximumPendingRequests else {
+            throw JSONRPCError.notificationSendLimitExceeded(
+                limit: maximumPendingRequests
+            )
         }
 
         let data = try JSONRPCMessageCodec.encodeNotification(
@@ -221,19 +293,71 @@ public actor JSONRPCClient {
         guard data.count <= maximumRequestSize else {
             throw JSONRPCError.requestTooLarge(limit: maximumRequestSize)
         }
-        do {
-            try await transport.send(data)
-        } catch {
-            let transportError = normalizedTransportError(error)
-            close(with: transportError)
-            readerTask?.cancel()
-            beginTransportShutdown()
-            throw transportError
+        let sendToken = beginActiveSend()
+        activeNotificationSendTokens.insert(sendToken)
+        let timeoutTask = installNotificationTimeout(
+            for: sendToken,
+            duration: defaultRequestTimeout
+        )
+        defer {
+            timeoutTask.cancel()
+            notificationSendErrors.removeValue(forKey: sendToken)
+            activeNotificationSendTokens.remove(sendToken)
+            finishActiveSend(sendToken)
+        }
+        try await withTaskCancellationHandler {
+            guard !Task.isCancelled else {
+                cancelNotificationSend(sendToken)
+                throw JSONRPCError.transportClosed
+            }
+            do {
+                try await transport.send(data)
+            } catch {
+                if let terminalError = notificationSendErrors[sendToken] {
+                    throw terminalError
+                }
+                let transportError = normalizedTransportError(error)
+                close(with: transportError)
+                readerTask?.cancel()
+                beginTransportShutdown()
+                throw transportError
+            }
+            if Task.isCancelled {
+                cancelNotificationSend(sendToken)
+            }
+            if let terminalError = notificationSendErrors[sendToken] {
+                throw terminalError
+            }
+            guard case .running(let activeGeneration) = state,
+                  activeGeneration == generation else {
+                throw JSONRPCError.transportClosed
+            }
+        } onCancel: {
+            Task { [weak self] in
+                await self?.cancelNotificationSend(sendToken)
+            }
         }
     }
 
+    /// Returns one bounded stream shared by all callers. Iterators compete for
+    /// events; this API intentionally does not provide broadcast delivery.
+    /// Cancelling an iterator terminates the only channel and fails the client
+    /// closed, preventing notifications from being silently discarded.
     public func notifications() -> AsyncThrowingStream<JSONRPCNotification, Error> {
         notificationStream
+    }
+
+    func waitForActiveSendQuiescence() async {
+        guard !activeSendTokens.isEmpty else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            if activeSendTokens.isEmpty {
+                continuation.resume()
+            } else {
+                sendQuiescenceWaiters.append(continuation)
+            }
+        }
     }
 
     public func shutdown() async throws {
@@ -242,17 +366,21 @@ public actor JSONRPCClient {
         reader?.cancel()
         beginTransportShutdown()
 
+        var shutdownError: JSONRPCError?
         do {
             try await awaitTransportShutdown()
         } catch {
-            _ = await reader?.result
-            throw error
+            shutdownError = normalizedTransportError(error)
         }
         _ = await reader?.result
+        await waitForQuiescence()
         if readerTask != nil {
             readerTask = nil
         }
         receiveBuffer.removeAll(keepingCapacity: false)
+        if let shutdownError {
+            throw shutdownError
+        }
     }
 
     private func allocateRequestID() throws -> JSONRPCRequestID {
@@ -287,6 +415,37 @@ public actor JSONRPCClient {
         }
     }
 
+    private func installNotificationTimeout(
+        for token: UInt64,
+        duration: Duration
+    ) -> Task<Void, Never> {
+        let scheduler = timeoutScheduler
+        return Task { [weak self] in
+            do {
+                try await scheduler.wait(for: duration)
+                guard !Task.isCancelled else {
+                    return
+                }
+                await self?.timeoutNotificationSend(token)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func settleRequestSend(_ id: JSONRPCRequestID) {
+        guard var pending = pendingRequests[id] else {
+            return
+        }
+        pending.deliveryUncertain = false
+        guard let outcome = pending.bufferedOutcome else {
+            pendingRequests[id] = pending
+            return
+        }
+        pendingRequests.removeValue(forKey: id)
+        complete(pending, with: outcome)
+    }
+
     private func timeoutRequest(_ id: JSONRPCRequestID) {
         guard let pending = pendingRequests.removeValue(forKey: id) else {
             return
@@ -295,7 +454,7 @@ public actor JSONRPCClient {
             throwing: JSONRPCError.requestTimedOut(id)
         )
         if pending.deliveryUncertain {
-            closeAfterUncertainDelivery()
+            closeFailClosed()
         }
     }
 
@@ -307,8 +466,46 @@ public actor JSONRPCClient {
         pending.continuation.finish(
             throwing: JSONRPCError.requestCancelled(id)
         )
+        closeFailClosed()
+    }
+
+    private func receive(
+        _ outcome: RequestOutcome,
+        for id: JSONRPCRequestID
+    ) throws {
+        guard var pending = pendingRequests[id] else {
+            if isPreviouslyAllocatedRequestID(id) {
+                return
+            }
+            throw JSONRPCError.unknownResponseID(
+                id.sanitizedForErrorStorage
+            )
+        }
+        guard pending.bufferedOutcome == nil else {
+            return
+        }
         if pending.deliveryUncertain {
-            closeAfterUncertainDelivery()
+            pending.bufferedOutcome = outcome
+            pendingRequests[id] = pending
+            return
+        }
+        pendingRequests.removeValue(forKey: id)
+        complete(pending, with: outcome)
+    }
+
+    private func complete(
+        _ pending: PendingRequest,
+        with outcome: RequestOutcome
+    ) {
+        pending.timeoutTask?.cancel()
+        switch outcome {
+        case .success(let result):
+            pending.continuation.yield(result)
+            pending.continuation.finish()
+        case .failure(let code):
+            pending.continuation.finish(
+                throwing: JSONRPCError.remoteError(code: code)
+            )
         }
     }
 
@@ -321,10 +518,10 @@ public actor JSONRPCClient {
         }
         pending.timeoutTask?.cancel()
         pending.continuation.finish(throwing: error)
-        closeAfterUncertainDelivery()
+        closeFailClosed()
     }
 
-    private func closeAfterUncertainDelivery() {
+    private func closeFailClosed() {
         close(with: JSONRPCError.transportClosed)
         readerTask?.cancel()
         beginTransportShutdown()
@@ -338,10 +535,13 @@ public actor JSONRPCClient {
 
         receiveBuffer.append(chunk)
         while let newline = receiveBuffer.firstIndex(of: 0x0A) {
-            let lineSize = receiveBuffer.distance(
+            let rawLineSize = receiveBuffer.distance(
                 from: receiveBuffer.startIndex,
                 to: newline
             )
+            let hasCarriageReturn = rawLineSize > 0
+                && receiveBuffer[receiveBuffer.index(before: newline)] == 0x0D
+            let lineSize = rawLineSize - (hasCarriageReturn ? 1 : 0)
             guard lineSize <= maximumLineSize else {
                 throw JSONRPCError.responseTooLarge(limit: maximumLineSize)
             }
@@ -356,7 +556,8 @@ public actor JSONRPCClient {
             }
         }
 
-        guard receiveBuffer.count <= maximumLineSize else {
+        guard lineSizeExcludingOptionalCarriageReturn(receiveBuffer)
+            <= maximumLineSize else {
             throw JSONRPCError.responseTooLarge(limit: maximumLineSize)
         }
     }
@@ -378,25 +579,10 @@ public actor JSONRPCClient {
             }
 
         case .success(let id, let result):
-            guard let pending = pendingRequests.removeValue(forKey: id) else {
-                throw JSONRPCError.unknownResponseID(
-                    id.sanitizedForErrorStorage
-                )
-            }
-            pending.timeoutTask?.cancel()
-            pending.continuation.yield(result)
-            pending.continuation.finish()
+            try receive(.success(result), for: id)
 
         case .failure(let id, let code):
-            guard let pending = pendingRequests.removeValue(forKey: id) else {
-                throw JSONRPCError.unknownResponseID(
-                    id.sanitizedForErrorStorage
-                )
-            }
-            pending.timeoutTask?.cancel()
-            pending.continuation.finish(
-                throwing: JSONRPCError.remoteError(code: code)
-            )
+            try receive(.failure(code: code), for: id)
         }
     }
 
@@ -411,15 +597,15 @@ public actor JSONRPCClient {
 
         if !receiveBuffer.isEmpty {
             do {
-                guard receiveBuffer.count <= maximumLineSize else {
-                    throw JSONRPCError.responseTooLarge(
-                        limit: maximumLineSize
-                    )
-                }
                 var line = receiveBuffer
                 receiveBuffer.removeAll(keepingCapacity: false)
                 if line.last == 0x0D {
                     line.removeLast()
+                }
+                guard line.count <= maximumLineSize else {
+                    throw JSONRPCError.responseTooLarge(
+                        limit: maximumLineSize
+                    )
                 }
                 if !line.isEmpty {
                     try handle(JSONRPCMessageCodec.decodeIncoming(line))
@@ -449,6 +635,38 @@ public actor JSONRPCClient {
         state = .closed
         failAllPending(with: error)
         notificationContinuation.finish(throwing: error)
+        resumeSendQuiescenceWaitersIfNeeded()
+    }
+
+    private func notificationStreamWasCancelled() {
+        guard state != .closed else {
+            return
+        }
+        close(with: JSONRPCError.transportClosed)
+        readerTask?.cancel()
+        beginTransportShutdown()
+    }
+
+    private func cancelNotificationSend(_ token: UInt64) {
+        guard activeSendTokens.contains(token),
+              notificationSendErrors[token] == nil else {
+            return
+        }
+        notificationSendErrors[token] = .transportClosed
+        close(with: JSONRPCError.transportClosed)
+        readerTask?.cancel()
+        beginTransportShutdown()
+    }
+
+    private func timeoutNotificationSend(_ token: UInt64) {
+        guard activeSendTokens.contains(token),
+              notificationSendErrors[token] == nil else {
+            return
+        }
+        notificationSendErrors[token] = .notificationTimedOut
+        close(with: JSONRPCError.transportClosed)
+        readerTask?.cancel()
+        beginTransportShutdown()
     }
 
     private func beginTransportShutdown() {
@@ -513,6 +731,80 @@ public actor JSONRPCClient {
             return false
         }
         return activeGeneration == generation
+    }
+
+    private func isPreviouslyAllocatedRequestID(
+        _ id: JSONRPCRequestID
+    ) -> Bool {
+        guard case .integer(let value) = id else {
+            return false
+        }
+        return value > 0 && value < nextRequestID
+    }
+
+    private func beginActiveSend() -> UInt64 {
+        let token = nextSendToken
+        nextSendToken &+= 1
+        if nextSendToken == 0 {
+            nextSendToken = 1
+        }
+        activeSendTokens.insert(token)
+        return token
+    }
+
+    private func finishActiveSend(_ token: UInt64) {
+        activeSendTokens.remove(token)
+        // A waiter resumes on this actor only after the current turn finishes.
+        // Request send settlement therefore completes before the barrier returns.
+        resumeSendQuiescenceWaitersIfNeeded()
+        resumeQuiescenceWaitersIfNeeded()
+    }
+
+    private func resumeSendQuiescenceWaitersIfNeeded() {
+        guard activeSendTokens.isEmpty else {
+            return
+        }
+        let waiters = sendQuiescenceWaiters
+        sendQuiescenceWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func releaseRequestSlot(_ id: JSONRPCRequestID) {
+        activeRequestSlots.remove(id)
+        resumeQuiescenceWaitersIfNeeded()
+    }
+
+    private func waitForQuiescence() async {
+        guard !activeRequestSlots.isEmpty || !activeSendTokens.isEmpty else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            if activeRequestSlots.isEmpty && activeSendTokens.isEmpty {
+                continuation.resume()
+            } else {
+                quiescenceWaiters.append(continuation)
+            }
+        }
+    }
+
+    private func resumeQuiescenceWaitersIfNeeded() {
+        guard activeRequestSlots.isEmpty,
+              activeSendTokens.isEmpty else {
+            return
+        }
+        let waiters = quiescenceWaiters
+        quiescenceWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func lineSizeExcludingOptionalCarriageReturn(
+        _ data: Data
+    ) -> Int {
+        data.count - (data.last == 0x0D ? 1 : 0)
     }
 
     private func failAllPending(with error: JSONRPCError) {

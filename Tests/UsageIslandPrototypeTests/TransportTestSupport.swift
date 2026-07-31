@@ -263,6 +263,121 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     }
 }
 
+actor NonCooperativeSendJSONRPCTransport: JSONRPCTransport {
+    private let stream: AsyncThrowingStream<Data, Error>
+    private let continuation: AsyncThrowingStream<Data, Error>.Continuation
+    private let sendObservedStream: AsyncStream<Void>
+    private let sendObservedContinuation: AsyncStream<Void>.Continuation
+    private let shutdownObservedStream: AsyncStream<Void>
+    private let shutdownObservedContinuation: AsyncStream<Void>.Continuation
+    private let returnsNormallyAfterShutdown: Bool
+    private var sendWaiters: [CheckedContinuation<Void, Never>] = []
+    private var sentData: [Data] = []
+    private var sendsInFlight = 0
+    private var shutdownCalls = 0
+    private var didShutdown = false
+
+    init(returnsNormallyAfterShutdown: Bool = false) {
+        let pair = AsyncThrowingStream<Data, Error>.makeStream()
+        stream = pair.stream
+        continuation = pair.continuation
+        let sendObservedPair = AsyncStream<Void>.makeStream()
+        sendObservedStream = sendObservedPair.stream
+        sendObservedContinuation = sendObservedPair.continuation
+        let shutdownObservedPair = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        shutdownObservedStream = shutdownObservedPair.stream
+        shutdownObservedContinuation = shutdownObservedPair.continuation
+        self.returnsNormallyAfterShutdown = returnsNormallyAfterShutdown
+    }
+
+    func start() async throws {}
+
+    func send(_ data: Data) async throws {
+        guard !didShutdown else {
+            throw JSONRPCError.transportClosed
+        }
+        sentData.append(data)
+        sendsInFlight += 1
+        sendObservedContinuation.yield()
+        await withCheckedContinuation { continuation in
+            sendWaiters.append(continuation)
+        }
+        sendsInFlight -= 1
+        guard !didShutdown || returnsNormallyAfterShutdown else {
+            throw JSONRPCError.transportClosed
+        }
+    }
+
+    func incomingBytes() async -> AsyncThrowingStream<Data, Error> {
+        stream
+    }
+
+    func shutdown() async throws {
+        guard !didShutdown else {
+            return
+        }
+        didShutdown = true
+        shutdownCalls += 1
+        shutdownObservedContinuation.yield()
+        continuation.finish()
+        let waiters = sendWaiters
+        sendWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func emit(_ data: Data) {
+        continuation.yield(data)
+    }
+
+    func releaseSends() {
+        let waiters = sendWaiters
+        sendWaiters.removeAll(keepingCapacity: false)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func dataSent(at index: Int) async throws -> Data {
+        var iterator = sendObservedStream.makeAsyncIterator()
+        while !sentData.indices.contains(index) {
+            guard await iterator.next() != nil else {
+                throw TransportTestProbeError.conditionNotReached(
+                    "Message \(index) was not sent"
+                )
+            }
+        }
+        return sentData[index]
+    }
+
+    func waitUntilShutdownCalled() async throws {
+        guard shutdownCalls == 0 else {
+            return
+        }
+        var iterator = shutdownObservedStream.makeAsyncIterator()
+        guard await iterator.next() != nil else {
+            throw TransportTestProbeError.conditionNotReached(
+                "Transport shutdown was not called"
+            )
+        }
+    }
+
+    func sentMessageCount() -> Int {
+        sentData.count
+    }
+
+    func sendsCurrentlyInFlight() -> Int {
+        sendsInFlight
+    }
+
+    func shutdownCallCount() -> Int {
+        shutdownCalls
+    }
+}
+
 enum TransportTestProbeError: Error {
     case conditionNotReached(String)
 }
@@ -349,37 +464,70 @@ struct ControlledTimeoutScheduler: JSONRPCTimeoutScheduler {
 actor ManualTimeoutScheduler: JSONRPCTimeoutScheduler {
     private let stream: AsyncStream<Void>
     private let continuation: AsyncStream<Void>.Continuation
+    private let scheduledStream: AsyncStream<Void>
+    private let scheduledContinuation: AsyncStream<Void>.Continuation
+    private let completionStream: AsyncStream<Void>
+    private let completionContinuation: AsyncStream<Void>.Continuation
     private var waitCalls = 0
+    private var completedWaitCalls = 0
+    private var durations: [Duration] = []
 
     init() {
         let pair = AsyncStream<Void>.makeStream()
         stream = pair.stream
         continuation = pair.continuation
+        let scheduledPair = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        scheduledStream = scheduledPair.stream
+        scheduledContinuation = scheduledPair.continuation
+        let completionPair = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        completionStream = completionPair.stream
+        completionContinuation = completionPair.continuation
     }
 
     func wait(for duration: Duration) async throws {
         waitCalls += 1
+        durations.append(duration)
+        scheduledContinuation.yield()
+        defer {
+            completedWaitCalls += 1
+            completionContinuation.yield()
+        }
         var iterator = stream.makeAsyncIterator()
         guard await iterator.next() != nil else {
             throw CancellationError()
         }
     }
 
-    func waitUntilScheduled(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
-            try Task.checkCancellation()
-            if waitCalls > 0 {
-                return
-            }
-            await Task.yield()
+    func waitUntilScheduled() async throws {
+        guard waitCalls == 0 else {
+            return
         }
-        throw TransportTestProbeError.conditionNotReached(
-            "Timeout was not scheduled"
-        )
+        var iterator = scheduledStream.makeAsyncIterator()
+        guard await iterator.next() != nil else {
+            throw TransportTestProbeError.conditionNotReached(
+                "Timeout was not scheduled"
+            )
+        }
+    }
+
+    func waitUntilWaitCompleted() async throws {
+        guard completedWaitCalls == 0 else {
+            return
+        }
+        var iterator = completionStream.makeAsyncIterator()
+        _ = await iterator.next()
     }
 
     func fire() {
         continuation.yield()
+    }
+
+    func scheduledDurations() -> [Duration] {
+        durations
     }
 }
 

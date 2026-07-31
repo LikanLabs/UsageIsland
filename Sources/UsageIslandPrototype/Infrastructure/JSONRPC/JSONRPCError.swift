@@ -8,6 +8,11 @@ public enum JSONRPCError: Error, Equatable, Sendable {
     case processTerminationTimedOut
     case processInputBufferOverflow(limit: Int)
     case requestTooLarge(limit: Int)
+    case invalidPendingRequestLimit
+    case pendingRequestLimitExceeded(limit: Int)
+    case invalidRequestTimeout
+    case notificationSendLimitExceeded(limit: Int)
+    case notificationTimedOut
     case notInitialized
     case alreadyInitialized
     case startupCancelled
@@ -41,6 +46,16 @@ extension JSONRPCError: LocalizedError {
             "The process input buffer exceeded its safe limit of \(limit)."
         case .requestTooLarge(let limit):
             "The JSON-RPC request exceeded the safe limit of \(limit) bytes."
+        case .invalidPendingRequestLimit:
+            "The JSON-RPC request and notification send limit must be greater than zero."
+        case .pendingRequestLimitExceeded(let limit):
+            "The JSON-RPC client reached its limit of \(limit) pending requests."
+        case .invalidRequestTimeout:
+            "The JSON-RPC request timeout must be greater than zero."
+        case .notificationSendLimitExceeded(let limit):
+            "The JSON-RPC client reached its limit of \(limit) active notification sends."
+        case .notificationTimedOut:
+            "The JSON-RPC notification send timed out."
         case .notInitialized:
             "The client has not completed initialization."
         case .alreadyInitialized:
