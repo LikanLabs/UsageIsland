@@ -81,7 +81,7 @@ public struct PulseView: View {
       Spacer(minLength: 10)
 
       Button {
-        model.applyScenario(model.scenario)
+        Task { await model.refreshUsage() }
       } label: {
         Image(systemName: "arrow.clockwise")
       }

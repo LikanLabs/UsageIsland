@@ -4,14 +4,16 @@ import Combine
 @MainActor
 public final class BeaconController: NSObject {
     private let model: AppModel
+    let allowsDemoScenarios: Bool
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var cancellables: Set<AnyCancellable> = []
     public var onTogglePulse: (() -> Void)?
     public var onRefreshLayout: (() -> Void)?
     public var onRequestAccessibility: (() -> Void)?
 
-    public init(model: AppModel) {
+    public init(model: AppModel, allowsDemoScenarios: Bool = true) {
         self.model = model
+        self.allowsDemoScenarios = allowsDemoScenarios
         super.init()
         configureButton()
         observeModel()
@@ -76,17 +78,19 @@ public final class BeaconController: NSObject {
         menu.addItem(open)
         menu.addItem(.separator())
 
-        let scenarios = NSMenuItem(title: "Escenario", action: nil, keyEquivalent: "")
-        let scenarioMenu = NSMenu()
-        for scenario in DemoScenario.allCases {
-            let item = NSMenuItem(title: scenarioTitle(scenario), action: #selector(selectScenario(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = scenario.rawValue
-            item.state = model.scenario == scenario ? .on : .off
-            scenarioMenu.addItem(item)
+        if allowsDemoScenarios {
+            let scenarios = NSMenuItem(title: "Escenario", action: nil, keyEquivalent: "")
+            let scenarioMenu = NSMenu()
+            for scenario in Self.demoScenarios(whenAllowed: allowsDemoScenarios) {
+                let item = NSMenuItem(title: scenarioTitle(scenario), action: #selector(selectScenario(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = scenario.rawValue
+                item.state = model.scenario == scenario ? .on : .off
+                scenarioMenu.addItem(item)
+            }
+            scenarios.submenu = scenarioMenu
+            menu.addItem(scenarios)
         }
-        scenarios.submenu = scenarioMenu
-        menu.addItem(scenarios)
 
         let layouts = NSMenuItem(title: "Layout", action: nil, keyEquivalent: "")
         let layoutMenu = NSMenu()
@@ -169,6 +173,10 @@ public final class BeaconController: NSObject {
         case .waiting: "Espera aprobación"
         case .error: "Error"
         }
+    }
+
+    static func demoScenarios(whenAllowed allowsDemoScenarios: Bool) -> [DemoScenario] {
+        allowsDemoScenarios ? DemoScenario.allCases : []
     }
 
     private func layoutTitle(_ layout: WingPresentationMode) -> String {

@@ -28,6 +28,7 @@ public final class AppModel: ObservableObject {
         providerAdapters: [any UsageProvider],
         clock: any UsageClock,
         initialSnapshots: [UsageSnapshot],
+        initialAgents: [AgentSession]? = nil,
         initialScenario: DemoScenario = .normal
     ) throws(AppModelConfigurationError) {
         let configuration = try Self.validateConfiguration(
@@ -37,6 +38,7 @@ public final class AppModel: ObservableObject {
         self.init(
             configuration: configuration,
             clock: clock,
+            initialAgents: initialAgents,
             initialScenario: initialScenario
         )
     }
@@ -44,6 +46,7 @@ public final class AppModel: ObservableObject {
     private init(
         configuration: ValidatedAppModelConfiguration,
         clock: any UsageClock,
+        initialAgents: [AgentSession]?,
         initialScenario: DemoScenario
     ) {
         self.clock = clock
@@ -52,11 +55,16 @@ public final class AppModel: ObservableObject {
         connectionStates = configuration.connectionStates
         scenario = initialScenario
         lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
-        applyAgents(for: initialScenario)
+        if let initialAgents {
+            agents = initialAgents
+        } else {
+            applyAgents(for: initialScenario)
+        }
     }
 
     static func empty(
         clock: any UsageClock,
+        initialAgents: [AgentSession]? = nil,
         initialScenario: DemoScenario = .normal
     ) -> AppModel {
         AppModel(
@@ -66,6 +74,7 @@ public final class AppModel: ObservableObject {
                 connectionStates: [:]
             ),
             clock: clock,
+            initialAgents: initialAgents,
             initialScenario: initialScenario
         )
     }
