@@ -151,7 +151,7 @@ final class AppModelStoreTests: XCTestCase {
 
         model.applyScenario(.waiting)
         XCTAssertEqual(
-            model.providers.first(where: { $0.id == .codex })?.shortWindow.remainingPercent,
+            model.providers.first(where: { $0.id == .codex })?.preferredWindow.remainingPercent,
             41
         )
     }
@@ -193,7 +193,7 @@ final class AppModelStoreTests: XCTestCase {
         XCTAssertEqual(model.connectionStates[.codex], .failed)
         XCTAssertEqual(model.freshness(for: .codex), .stale)
         XCTAssertEqual(model.providers.count, 1)
-        XCTAssertEqual(model.providers[0].shortWindow, refreshed.shortWindow)
+        XCTAssertEqual(model.providers[0].preferredWindow, refreshed.preferredWindow)
         XCTAssertEqual(model.providers[0].freshness, .stale)
         XCTAssertEqual(model.lastUpdatedAt, refreshed.capturedAt)
     }
@@ -286,7 +286,7 @@ final class AppModelStoreTests: XCTestCase {
 
         XCTAssertEqual(model.providers.count, 1)
         XCTAssertEqual(model.providers[0].id, .codex)
-        XCTAssertEqual(model.providers[0].shortWindow, initial.shortWindow)
+        XCTAssertEqual(model.providers[0].preferredWindow, initial.preferredWindow)
         XCTAssertEqual(model.providers[0].freshness, .stale)
         XCTAssertEqual(model.connectionStates[.codex], .failed)
     }
@@ -325,7 +325,10 @@ final class AppModelStoreTests: XCTestCase {
 
         XCTAssertEqual(providerPublications.count, 1)
         XCTAssertEqual(providerPublications[0].map(\.id), [.claude, .codex])
-        XCTAssertEqual(providerPublications[0][0].shortWindow, initialClaude.shortWindow)
+        XCTAssertEqual(
+            providerPublications[0][0].preferredWindow,
+            initialClaude.preferredWindow
+        )
         XCTAssertEqual(providerPublications[0][0].freshness, .stale)
         XCTAssertEqual(providerPublications[0][1], refreshedCodex)
         XCTAssertEqual(model.connectionStates[.claude], .failed)
@@ -351,7 +354,7 @@ final class AppModelStoreTests: XCTestCase {
 
         XCTAssertEqual(model.providers, [initial])
         XCTAssertEqual(model.connectionStates[.codex], .disconnected)
-        XCTAssertNotEqual(model.providers[0].shortWindow.remainingPercent, 5)
+        XCTAssertNotEqual(model.providers[0].preferredWindow.remainingPercent, 5)
         XCTAssertTrue(observedCancellation)
     }
 
@@ -388,15 +391,22 @@ final class AppModelStoreTests: XCTestCase {
         capturedAt: Date
     ) -> UsageSnapshot {
         UsageSnapshot(
-            id: id,
-            shortWindow: UsageWindow(
+            validatedProvider: id,
+            preferredWindow: UsageWindow(
+                validatedDurationMinutes: 300,
                 remainingPercent: remaining,
                 resetsAt: capturedAt.addingTimeInterval(3_600)
             ),
-            weeklyRemainingPercent: 50,
+            additionalWindows: [
+                UsageWindow(
+                    validatedDurationMinutes: 10_080,
+                    remainingPercent: 50,
+                    resetsAt: nil
+                )
+            ],
             weeklySpend: 1.25,
             freshness: .fresh,
-            isCurrentlyActive: false,
+            isActivelyUsed: false,
             capturedAt: capturedAt
         )
     }

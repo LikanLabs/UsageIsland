@@ -43,32 +43,79 @@ public enum AppModelConfigurationError: Error, Equatable, Sendable {
     case snapshotWithoutAdapter(ProviderID)
 }
 
+public enum UsageDomainError: Error, Equatable, Sendable {
+    case invalidWindowDuration(Int)
+    case duplicateWindowDuration(Int)
+}
+
 public struct UsageWindow: Equatable, Sendable {
-    public private(set) var usedPercent: Int
-    public var resetsAt: Date
+    public let durationMinutes: Int
+    public let usedPercent: Int
+    public let resetsAt: Date?
 
     public var remainingPercent: Int {
         Self.clamp(100 - usedPercent)
     }
 
-    public init(usedPercent: Int, resetsAt: Date) {
-        self.usedPercent = Self.clamp(usedPercent)
-        self.resetsAt = resetsAt
+    public init(
+        durationMinutes: Int,
+        usedPercent: Int,
+        resetsAt: Date?
+    ) throws {
+        guard durationMinutes > 0 else {
+            throw UsageDomainError.invalidWindowDuration(durationMinutes)
+        }
+        self.init(
+            validatedDurationMinutes: durationMinutes,
+            usedPercent: usedPercent,
+            resetsAt: resetsAt
+        )
     }
 
-    public init(remainingPercent: Int, resetsAt: Date) {
-        self.init(usedPercent: 100 - Self.clamp(remainingPercent), resetsAt: resetsAt)
+    public init(
+        durationMinutes: Int,
+        remainingPercent: Int,
+        resetsAt: Date?
+    ) throws {
+        try self.init(
+            durationMinutes: durationMinutes,
+            usedPercent: 100 - Self.clamp(remainingPercent),
+            resetsAt: resetsAt
+        )
     }
 
     private static func clamp(_ value: Int) -> Int {
         min(max(value, 0), 100)
     }
+
+    // Fixed in-module fixtures use explicit, test-covered positive durations.
+    init(
+        validatedDurationMinutes durationMinutes: Int,
+        usedPercent: Int,
+        resetsAt: Date?
+    ) {
+        self.durationMinutes = durationMinutes
+        self.usedPercent = Self.clamp(usedPercent)
+        self.resetsAt = resetsAt
+    }
+
+    init(
+        validatedDurationMinutes durationMinutes: Int,
+        remainingPercent: Int,
+        resetsAt: Date?
+    ) {
+        self.init(
+            validatedDurationMinutes: durationMinutes,
+            usedPercent: 100 - Self.clamp(remainingPercent),
+            resetsAt: resetsAt
+        )
+    }
 }
 
 public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     public var provider: ProviderID
-    public var shortWindow: UsageWindow
-    public private(set) var weeklyUsedPercent: Int?
+    public let preferredWindow: UsageWindow
+    public let additionalWindows: [UsageWindow]
     public var weeklySpend: Decimal?
     public var freshness: DataFreshness
     public var isActivelyUsed: Bool
@@ -76,8 +123,24 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
 
     public var id: ProviderID { provider }
 
+    public var windows: [UsageWindow] {
+        [preferredWindow] + additionalWindows
+    }
+
+    public var shortWindow: UsageWindow? {
+        windows.first { $0.durationMinutes == 300 }
+    }
+
+    public var weeklyWindow: UsageWindow? {
+        windows.first { $0.durationMinutes == 10_080 }
+    }
+
+    public var weeklyUsedPercent: Int? {
+        weeklyWindow?.usedPercent
+    }
+
     public var weeklyRemainingPercent: Int? {
-        weeklyUsedPercent.map { min(max(100 - $0, 0), 100) }
+        weeklyWindow?.remainingPercent
     }
 
     public var isCurrentlyActive: Bool {
@@ -86,7 +149,7 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     }
 
     public var priorityScore: Int {
-        let remaining = shortWindow.remainingPercent
+        let remaining = preferredWindow.remainingPercent
         let thresholdScore: Int
         if remaining <= 10 {
             thresholdScore = 1_000
@@ -101,40 +164,69 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
 
     public init(
         provider: ProviderID,
-        shortWindow: UsageWindow,
-        weeklyUsedPercent: Int?,
+        preferredWindow: UsageWindow,
+        additionalWindows: [UsageWindow],
+        weeklySpend: Decimal?,
+        freshness: DataFreshness,
+        isActivelyUsed: Bool,
+        capturedAt: Date
+    ) throws {
+        var durations = Set<Int>()
+        for window in [preferredWindow] + additionalWindows {
+            guard durations.insert(window.durationMinutes).inserted else {
+                throw UsageDomainError.duplicateWindowDuration(
+                    window.durationMinutes
+                )
+            }
+        }
+
+        self.init(
+            validatedProvider: provider,
+            preferredWindow: preferredWindow,
+            additionalWindows: additionalWindows,
+            weeklySpend: weeklySpend,
+            freshness: freshness,
+            isActivelyUsed: isActivelyUsed,
+            capturedAt: capturedAt
+        )
+    }
+
+    public init(
+        id: ProviderID,
+        preferredWindow: UsageWindow,
+        additionalWindows: [UsageWindow],
+        weeklySpend: Decimal?,
+        freshness: DataFreshness,
+        isCurrentlyActive: Bool,
+        capturedAt: Date
+    ) throws {
+        try self.init(
+            provider: id,
+            preferredWindow: preferredWindow,
+            additionalWindows: additionalWindows,
+            weeklySpend: weeklySpend,
+            freshness: freshness,
+            isActivelyUsed: isCurrentlyActive,
+            capturedAt: capturedAt
+        )
+    }
+    // Fixed in-module fixtures use explicit, test-covered unique durations.
+    init(
+        validatedProvider provider: ProviderID,
+        preferredWindow: UsageWindow,
+        additionalWindows: [UsageWindow],
         weeklySpend: Decimal?,
         freshness: DataFreshness,
         isActivelyUsed: Bool,
         capturedAt: Date
     ) {
         self.provider = provider
-        self.shortWindow = shortWindow
-        self.weeklyUsedPercent = weeklyUsedPercent.map { min(max($0, 0), 100) }
+        self.preferredWindow = preferredWindow
+        self.additionalWindows = additionalWindows
         self.weeklySpend = weeklySpend
         self.freshness = freshness
         self.isActivelyUsed = isActivelyUsed
         self.capturedAt = capturedAt
-    }
-
-    public init(
-        id: ProviderID,
-        shortWindow: UsageWindow,
-        weeklyRemainingPercent: Int?,
-        weeklySpend: Decimal?,
-        freshness: DataFreshness,
-        isCurrentlyActive: Bool,
-        capturedAt: Date
-    ) {
-        self.init(
-            provider: id,
-            shortWindow: shortWindow,
-            weeklyUsedPercent: weeklyRemainingPercent.map { 100 - min(max($0, 0), 100) },
-            weeklySpend: weeklySpend,
-            freshness: freshness,
-            isActivelyUsed: isCurrentlyActive,
-            capturedAt: capturedAt
-        )
     }
 }
 

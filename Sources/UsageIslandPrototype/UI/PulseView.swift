@@ -139,7 +139,7 @@ public struct PulseView: View {
           .lineLimit(1)
           .minimumScaleFactor(0.90)
 
-        if let weekly = provider.weeklyRemainingPercent {
+        if let weekly = UsageFormatting.secondaryWeeklyRemainingPercent(for: provider) {
           Text("Semana \(weekly)%")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(UsageIslandTokens.secondaryText)
@@ -165,14 +165,14 @@ public struct PulseView: View {
       .fixedSize(horizontal: true, vertical: false)
       .frame(width: 64, alignment: .trailing)
 
-      Text("\(provider.shortWindow.remainingPercent)%")
+      Text("\(provider.preferredWindow.remainingPercent)%")
         .font(.system(size: 16.5, weight: .bold, design: .rounded))
         .monospacedDigit()
-        .foregroundStyle(UsageIslandTokens.usageColor(for: provider.shortWindow.remainingPercent))
+        .foregroundStyle(UsageIslandTokens.usageColor(for: provider.preferredWindow.remainingPercent))
         .lineLimit(1)
         .frame(width: 58, alignment: .trailing)
 
-      Text(UsageFormatting.resetText(until: provider.shortWindow.resetsAt))
+      Text(UsageFormatting.resetText(until: provider.preferredWindow.resetsAt))
         .font(.system(size: 10.5, weight: .medium, design: .rounded))
         .monospacedDigit()
         .foregroundStyle(UsageIslandTokens.secondaryText)
@@ -185,8 +185,11 @@ public struct PulseView: View {
 
   private func expandedDetails(_ provider: ProviderUsage) -> some View {
     VStack(spacing: 6) {
-      detailLine("Cinco horas", value: "\(provider.shortWindow.remainingPercent)% restante")
-      if let weekly = provider.weeklyRemainingPercent {
+      detailLine(
+        UsageFormatting.windowDuration(provider.preferredWindow.durationMinutes),
+        value: "\(provider.preferredWindow.remainingPercent)% restante"
+      )
+      if let weekly = UsageFormatting.secondaryWeeklyRemainingPercent(for: provider) {
         detailLine("Semana", value: "\(weekly)% restante")
       }
       if let spend = UsageFormatting.currency(provider.weeklySpend) {

@@ -71,13 +71,38 @@ final class LiveCompositionTests: XCTestCase {
         )
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .connected)
         XCTAssertEqual(
-            harness.composition.model.providers.first(where: { $0.id == .claude })?.shortWindow,
-            initial.first(where: { $0.id == .claude })?.shortWindow
+            harness.composition.model.providers.first(where: { $0.id == .claude })?.preferredWindow,
+            initial.first(where: { $0.id == .claude })?.preferredWindow
         )
         XCTAssertEqual(
-            harness.composition.model.providers.first(where: { $0.id == .openCodeGo })?.shortWindow,
-            initial.first(where: { $0.id == .openCodeGo })?.shortWindow
+            harness.composition.model.providers.first(where: { $0.id == .openCodeGo })?.preferredWindow,
+            initial.first(where: { $0.id == .openCodeGo })?.preferredWindow
         )
+    }
+
+    func testWeeklyOnlyCodexSnapshotAppearsAfterRefresh() async throws {
+        let weeklyOnly: JSONValue = .object([
+            "rateLimits": .object([
+                "primary": .object([
+                    "windowDurationMins": .integer(10_080),
+                    "usedPercent": .number(48.5),
+                    "resetsAt": .null
+                ]),
+                "secondary": .null,
+                "planType": .string("pro")
+            ])
+        ])
+        let harness = makeLiveHarness(rateLimitsResponse: weeklyOnly)
+
+        await harness.composition.model.refreshUsage()
+
+        let codex = try XCTUnwrap(
+            harness.composition.model.providers.first { $0.id == .codex }
+        )
+        XCTAssertEqual(codex.preferredWindow.durationMinutes, 10_080)
+        XCTAssertEqual(codex.weeklyRemainingPercent, 51)
+        XCTAssertNil(codex.shortWindow)
+        XCTAssertEqual(harness.composition.model.connectionStates[.codex], .connected)
     }
 
     func testFirstCodexFailureKeepsOnlyImmediateDemoSnapshots() async {
@@ -102,7 +127,7 @@ final class LiveCompositionTests: XCTestCase {
         let staleCodex = try XCTUnwrap(
             harness.composition.model.providers.first(where: { $0.id == .codex })
         )
-        XCTAssertEqual(staleCodex.shortWindow, successfulCodex.shortWindow)
+        XCTAssertEqual(staleCodex.windows, successfulCodex.windows)
         XCTAssertEqual(staleCodex.freshness, .stale)
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .failed)
         XCTAssertEqual(harness.composition.model.providers.map(\.id), [.claude, .codex, .openCodeGo])
@@ -324,6 +349,7 @@ final class LiveCompositionTests: XCTestCase {
         startError: (any Error & Sendable)? = nil,
         shutdownError: (any Error & Sendable)? = nil,
         rateLimitFailures: Set<Int> = [],
+        rateLimitsResponse: JSONValue? = nil,
         providerFactory: ((LiveFakeCodexClient, any UsageClock) -> CodexUsageProvider)? = nil
     ) -> LiveHarness {
         let client = LiveFakeCodexClient(
@@ -331,7 +357,8 @@ final class LiveCompositionTests: XCTestCase {
             shutdownGate: shutdownGate,
             startError: startError,
             shutdownError: shutdownError,
-            rateLimitFailures: rateLimitFailures
+            rateLimitFailures: rateLimitFailures,
+            rateLimitsResponse: rateLimitsResponse
         )
         let locator = ExecutableLocator(
             environmentPath: nil,
@@ -382,6 +409,7 @@ private actor LiveFakeCodexClient: CodexUsageClient {
     private let startError: (any Error & Sendable)?
     private let shutdownError: (any Error & Sendable)?
     private let rateLimitFailures: Set<Int>
+    private let rateLimitsResponse: JSONValue
     private var startCalls = 0
     private var accountCalls = 0
     private var rateLimitCalls = 0
@@ -392,13 +420,15 @@ private actor LiveFakeCodexClient: CodexUsageClient {
         shutdownGate: LiveTestGate? = nil,
         startError: (any Error & Sendable)? = nil,
         shutdownError: (any Error & Sendable)? = nil,
-        rateLimitFailures: Set<Int> = []
+        rateLimitFailures: Set<Int> = [],
+        rateLimitsResponse: JSONValue? = nil
     ) {
         self.accountGate = accountGate
         self.shutdownGate = shutdownGate
         self.startError = startError
         self.shutdownError = shutdownError
         self.rateLimitFailures = rateLimitFailures
+        self.rateLimitsResponse = rateLimitsResponse ?? Self.defaultRateLimitsResponse
     }
 
     func start() async throws {
@@ -421,7 +451,7 @@ private actor LiveFakeCodexClient: CodexUsageClient {
             if rateLimitFailures.contains(rateLimitCalls) {
                 throw JSONRPCError.transportClosed
             }
-            return Self.rateLimitsResponse
+            return rateLimitsResponse
         default:
             throw JSONRPCError.remoteError(code: -32_601)
         }
@@ -462,7 +492,7 @@ private actor LiveFakeCodexClient: CodexUsageClient {
         ])
     ])
 
-    private static let rateLimitsResponse: JSONValue = .object([
+    private static let defaultRateLimitsResponse: JSONValue = .object([
         "rateLimits": .object([
             "primary": .object([
                 "windowDurationMins": .integer(300),

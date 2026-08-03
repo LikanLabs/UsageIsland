@@ -70,10 +70,10 @@ public struct UsageWingView: View {
                     .foregroundStyle(UsageIslandTokens.primaryText)
             }
 
-            Text("\(provider.shortWindow.remainingPercent)%")
+            Text("\(provider.preferredWindow.remainingPercent)%")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(UsageIslandTokens.usageColor(for: provider.shortWindow.remainingPercent))
+                .foregroundStyle(UsageIslandTokens.usageColor(for: provider.preferredWindow.remainingPercent))
 
             if provider.freshness == .stale {
                 Circle()

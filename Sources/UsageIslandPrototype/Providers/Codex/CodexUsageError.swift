@@ -7,11 +7,6 @@ enum CodexAccountMode: Equatable, Sendable {
     case unknown
 }
 
-enum CodexWindowKind: Equatable, Sendable {
-    case short
-    case weekly
-}
-
 enum CodexAppServerFailure: Equatable, Sendable {
     case executableUnavailable
     case startup
@@ -28,10 +23,9 @@ enum CodexUsageError: Error, Equatable, Sendable {
     case invalidAccountResponse
     case rateLimitsUnavailable
     case invalidCodexBucket
-    case missingShortWindow
     case invalidRateLimitResponse
-    case duplicateRecognizedWindow(CodexWindowKind)
-    case invalidResetTimestamp(CodexWindowKind)
+    case duplicateWindowDuration(Int)
+    case invalidResetTimestamp
     case appServerFailure(CodexAppServerFailure)
     case stopped
 }
@@ -58,29 +52,16 @@ extension CodexUsageError: LocalizedError {
             "Codex rate limits are unavailable."
         case .invalidCodexBucket:
             "Codex returned an invalid Codex rate-limit bucket."
-        case .missingShortWindow:
-            "Codex did not return the required five-hour window."
         case .invalidRateLimitResponse:
             "Codex returned an invalid rate-limit response."
-        case .duplicateRecognizedWindow(let kind):
-            "Codex returned duplicate " + kind.safeDescription
-                + " rate-limit windows."
-        case .invalidResetTimestamp(let kind):
-            "Codex returned an invalid " + kind.safeDescription
-                + " reset timestamp."
+        case .duplicateWindowDuration:
+            "Codex returned duplicate rate-limit window durations."
+        case .invalidResetTimestamp:
+            "Codex returned an invalid rate-limit reset timestamp."
         case .appServerFailure(let failure):
             failure.safeDescription
         case .stopped:
             "The Codex usage provider has stopped."
-        }
-    }
-}
-
-private extension CodexWindowKind {
-    var safeDescription: String {
-        switch self {
-        case .short: "five-hour"
-        case .weekly: "weekly"
         }
     }
 }

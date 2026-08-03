@@ -90,8 +90,8 @@ final class CodexUsageProviderTests: XCTestCase {
             CodexUsageError.unsupportedAccountMode(.apiKey).errorDescription,
             CodexUsageError.unsupportedAccountMode(.amazonBedrock)
                 .errorDescription,
-            CodexUsageError.invalidResetTimestamp(.short).errorDescription,
-            CodexUsageError.invalidResetTimestamp(.weekly).errorDescription,
+            CodexUsageError.invalidResetTimestamp.errorDescription,
+            CodexUsageError.duplicateWindowDuration(15).errorDescription,
             CodexUsageError.appServerFailure(.timeout).errorDescription,
             CodexUsageError.appServerFailure(.protocolViolation)
                 .errorDescription
@@ -391,7 +391,7 @@ final class CodexUsageProviderTests: XCTestCase {
         }
     }
 
-    func testSyntheticClientProducesNoPartialSnapshotAfterMappingFailure() async {
+    func testSyntheticClientProducesWeeklyOnlySnapshot() async throws {
         let client = FakeCodexUsageClient(
             rateLimitsResponse: .object([
                 "rateLimits": .object([
@@ -406,11 +406,37 @@ final class CodexUsageProviderTests: XCTestCase {
         )
         let provider = makeProvider(client: client)
 
+        let snapshot = try await provider.fetchUsage()
+
+        XCTAssertEqual(snapshot.preferredWindow.durationMinutes, 10_080)
+        XCTAssertEqual(snapshot.weeklyRemainingPercent, 50)
+        XCTAssertNil(snapshot.shortWindow)
+    }
+
+    func testSyntheticClientProducesNoSnapshotAfterDuplicateDuration() async {
+        let duplicatedWindow: JSONValue = .object([
+            "windowDurationMins": .integer(300),
+            "usedPercent": .integer(50),
+            "resetsAt": .null
+        ])
+        let client = FakeCodexUsageClient(
+            rateLimitsResponse: .object([
+                "rateLimits": .object([
+                    "primary": duplicatedWindow,
+                    "secondary": duplicatedWindow
+                ])
+            ])
+        )
+        let provider = makeProvider(client: client)
+
         do {
             _ = try await provider.fetchUsage()
-            XCTFail("Expected missing short window")
+            XCTFail("Expected duplicate duration failure")
         } catch {
-            XCTAssertEqual(error as? CodexUsageError, .missingShortWindow)
+            XCTAssertEqual(
+                error as? CodexUsageError,
+                .duplicateWindowDuration(300)
+            )
         }
     }
 

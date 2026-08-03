@@ -17,7 +17,11 @@ public struct DemoUsageProvider: UsageProvider {
     }
 
     public func snapshot(at now: Date? = nil) -> UsageSnapshot {
-        Self.snapshot(for: id, scenario: scenario, capturedAt: now ?? clock.now())
+        Self.snapshot(
+            for: id,
+            scenario: scenario,
+            capturedAt: now ?? clock.now()
+        )
     }
 
     public static func providerAdapters(
@@ -46,12 +50,19 @@ public struct DemoUsageProvider: UsageProvider {
     ) -> UsageSnapshot {
         let fixture = fixture(for: provider, scenario: scenario)
         return UsageSnapshot(
-            provider: provider,
-            shortWindow: UsageWindow(
+            validatedProvider: provider,
+            preferredWindow: UsageWindow(
+                validatedDurationMinutes: 300,
                 remainingPercent: fixture.shortWindowRemaining,
                 resetsAt: now.addingTimeInterval(fixture.resetOffset)
             ),
-            weeklyUsedPercent: 100 - fixture.weeklyRemaining,
+            additionalWindows: [
+                UsageWindow(
+                    validatedDurationMinutes: 10_080,
+                    remainingPercent: fixture.weeklyRemaining,
+                    resetsAt: nil
+                )
+            ],
             weeklySpend: fixture.weeklySpend,
             freshness: fixture.freshness,
             isActivelyUsed: fixture.isActivelyUsed,

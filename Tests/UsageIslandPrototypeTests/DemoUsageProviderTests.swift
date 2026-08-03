@@ -19,17 +19,27 @@ final class DemoUsageProviderTests: XCTestCase {
                 let snapshot = snapshots.first { $0.id == providerExpectation.id }
                 XCTAssertNotNil(snapshot)
                 XCTAssertEqual(
-                    snapshot?.shortWindow.remainingPercent,
+                    snapshot?.preferredWindow.durationMinutes,
+                    300
+                )
+                XCTAssertEqual(
+                    snapshot?.preferredWindow.remainingPercent,
                     providerExpectation.shortRemaining
                 )
                 XCTAssertEqual(
-                    snapshot?.shortWindow.usedPercent,
+                    snapshot?.preferredWindow.usedPercent,
                     100 - providerExpectation.shortRemaining
                 )
                 XCTAssertEqual(
-                    snapshot?.shortWindow.resetsAt,
+                    snapshot?.preferredWindow.resetsAt,
                     now.addingTimeInterval(providerExpectation.resetOffset)
                 )
+                XCTAssertEqual(snapshot?.additionalWindows.count, 1)
+                XCTAssertEqual(
+                    snapshot?.additionalWindows.first?.durationMinutes,
+                    10_080
+                )
+                XCTAssertNil(snapshot?.additionalWindows.first?.resetsAt)
                 XCTAssertEqual(
                     snapshot?.weeklyRemainingPercent,
                     providerExpectation.weeklyRemaining
@@ -41,6 +51,10 @@ final class DemoUsageProviderTests: XCTestCase {
                     providerExpectation.isActive
                 )
                 XCTAssertEqual(snapshot?.capturedAt, now)
+                XCTAssertEqual(
+                    snapshot?.priorityScore,
+                    providerExpectation.priorityScore
+                )
             }
         }
     }
@@ -56,7 +70,10 @@ final class DemoUsageProviderTests: XCTestCase {
 
         XCTAssertEqual(snapshot.id, .codex)
         XCTAssertEqual(snapshot.capturedAt, now)
-        XCTAssertEqual(snapshot.shortWindow.resetsAt, now.addingTimeInterval(2.1 * 3_600))
+        XCTAssertEqual(
+            snapshot.preferredWindow.resetsAt,
+            now.addingTimeInterval(2.1 * 3_600)
+        )
     }
 }
 
@@ -74,6 +91,18 @@ private extension DemoUsageProviderTests {
         let weeklySpend: Decimal
         let freshness: DataFreshness
         let isActive: Bool
+
+        var priorityScore: Int {
+            let threshold: Int
+            if shortRemaining <= 10 {
+                threshold = 1_000
+            } else if shortRemaining <= 30 {
+                threshold = 500
+            } else {
+                threshold = 0
+            }
+            return threshold + (isActive ? 250 : 0) + (100 - shortRemaining)
+        }
     }
 
     static let expectations: [ScenarioExpectation] = [

@@ -1,26 +1,46 @@
 import Foundation
 
+enum CodexPlanType: Equatable, Sendable {
+    case free
+    case go
+    case plus
+    case pro
+    case proLite
+    case team
+    case selfServeBusinessUsageBased
+    case business
+    case enterpriseCBPUsageBased
+    case enterprise
+    case education
+    case unknown
+
+    init(sanitizing value: String) {
+        switch value {
+        case "free": self = .free
+        case "go": self = .go
+        case "plus": self = .plus
+        case "pro": self = .pro
+        case "prolite": self = .proLite
+        case "team": self = .team
+        case "self_serve_business_usage_based":
+            self = .selfServeBusinessUsageBased
+        case "business": self = .business
+        case "enterprise_cbp_usage_based":
+            self = .enterpriseCBPUsageBased
+        case "enterprise": self = .enterprise
+        case "edu": self = .education
+        case "unknown": self = .unknown
+        default: self = .unknown
+        }
+    }
+}
+
 struct CodexAccountResponse: Sendable {
     private enum Account: Sendable {
-        case chatGPT
+        case chatGPT(CodexPlanType)
         case unsupported(CodexAccountMode)
         case absent
     }
-
-    private static let supportedPlanTypes: Set<String> = [
-        "free",
-        "go",
-        "plus",
-        "pro",
-        "prolite",
-        "team",
-        "self_serve_business_usage_based",
-        "business",
-        "enterprise_cbp_usage_based",
-        "enterprise",
-        "edu",
-        "unknown"
-    ]
 
     private let requiresOpenAIAuth: Bool
     private let account: Account
@@ -36,10 +56,10 @@ struct CodexAccountResponse: Sendable {
         account = try Self.parseAccount(object["account"])
     }
 
-    func validateAuthenticatedChatGPT() throws {
+    func validateAuthenticatedChatGPT() throws -> CodexPlanType {
         switch account {
-        case .chatGPT:
-            return
+        case .chatGPT(let planType):
+            return planType
         case .absent where requiresOpenAIAuth:
             throw CodexUsageError.notAuthenticated
         case .absent:
@@ -63,12 +83,11 @@ struct CodexAccountResponse: Sendable {
         case "chatgpt":
             guard let email = object["email"],
                   email == .null || email.stringValue != nil,
-                  case .string(let planType) = object["planType"],
-                  supportedPlanTypes.contains(planType)
+                  case .string(let planType) = object["planType"]
             else {
                 throw CodexUsageError.invalidAccountResponse
             }
-            return .chatGPT
+            return .chatGPT(CodexPlanType(sanitizing: planType))
         case "apiKey":
             return .unsupported(.apiKey)
         case "amazonBedrock":
@@ -80,22 +99,31 @@ struct CodexAccountResponse: Sendable {
 }
 
 struct CodexRateLimitWindow: Sendable {
-    let durationMinutes: Int64?
-    let usedPercent: Int
-    let reset: CodexResetValue
+    private static let maximumResetTimestamp = 253_402_300_799.0
 
-    init(validating value: JSONValue) throws {
-        guard case .object(let object) = value,
-              let usedPercentValue = object["usedPercent"]
-        else {
+    let durationMinutes: Int
+    let usedPercent: Int
+    let resetsAt: Date?
+
+    static func parse(_ value: JSONValue) throws -> CodexRateLimitWindow? {
+        guard case .object(let object) = value else {
             throw CodexUsageError.invalidRateLimitResponse
         }
 
-        durationMinutes = try Self.parseOptionalInteger(
+        guard let durationMinutes = parsePositiveDuration(
             object["windowDurationMins"]
+        ) else {
+            return nil
+        }
+        guard let usedPercentValue = object["usedPercent"] else {
+            throw CodexUsageError.invalidRateLimitResponse
+        }
+
+        return CodexRateLimitWindow(
+            durationMinutes: durationMinutes,
+            usedPercent: try parseCanonicalPercent(usedPercentValue),
+            resetsAt: try parseReset(object["resetsAt"])
         )
-        usedPercent = try Self.parseCanonicalPercent(usedPercentValue)
-        reset = Self.parseReset(object["resetsAt"])
     }
 
     private static func parseCanonicalPercent(_ value: JSONValue) throws -> Int {
@@ -130,42 +158,68 @@ struct CodexRateLimitWindow: Sendable {
         return Int(rounded)
     }
 
-    private static func parseOptionalInteger(_ value: JSONValue?) throws -> Int64? {
+    private static func parsePositiveDuration(_ value: JSONValue?) -> Int? {
         guard let value, value != .null else {
             return nil
         }
-        guard case .integer(let integer) = value else {
-            throw CodexUsageError.invalidRateLimitResponse
-        }
-        return integer
-    }
 
-    private static func parseReset(_ value: JSONValue?) -> CodexResetValue {
-        guard let value, value != .null else {
-            return .absentOrNull
-        }
         switch value {
         case .integer(let integer):
-            return .number(Double(integer))
+            guard integer > 0 else { return nil }
+            return Int(integer)
         case .number(let number):
-            return .number(number)
+            let upperBoundExclusive = -Double(Int.min)
+            guard number.isFinite,
+                  number > 0,
+                  number.rounded(.towardZero) == number,
+                  number < upperBoundExclusive else {
+                return nil
+            }
+            return Int(number)
         default:
-            return .invalid
+            return nil
         }
     }
-}
 
-enum CodexResetValue: Equatable, Sendable {
-    case absentOrNull
-    case number(Double)
-    case invalid
+    private static func parseReset(_ value: JSONValue?) throws -> Date? {
+        guard let value, value != .null else {
+            return nil
+        }
+
+        let timestamp: Double
+        switch value {
+        case .integer(let integer):
+            timestamp = Double(integer)
+        case .number(let number):
+            timestamp = number
+        default:
+            throw CodexUsageError.invalidResetTimestamp
+        }
+
+        guard timestamp.isFinite,
+              timestamp >= 0,
+              timestamp <= maximumResetTimestamp else {
+            throw CodexUsageError.invalidResetTimestamp
+        }
+        return Date(timeIntervalSince1970: timestamp)
+    }
 }
 
 struct CodexRateLimitSnapshot: Sendable {
     let windows: [CodexRateLimitWindow]
+    let planType: CodexPlanType?
 
     init(validating value: JSONValue) throws {
         guard case .object(let object) = value else {
+            throw CodexUsageError.invalidRateLimitResponse
+        }
+
+        switch object["planType"] {
+        case nil, .some(.null):
+            planType = nil
+        case .some(.string(let value)):
+            planType = CodexPlanType(sanitizing: value)
+        default:
             throw CodexUsageError.invalidRateLimitResponse
         }
 
@@ -174,7 +228,9 @@ struct CodexRateLimitSnapshot: Sendable {
             guard let value = object[key], value != .null else {
                 continue
             }
-            windows.append(try CodexRateLimitWindow(validating: value))
+            if let window = try CodexRateLimitWindow.parse(value) {
+                windows.append(window)
+            }
         }
         self.windows = windows
     }
@@ -216,6 +272,10 @@ struct CodexRateLimitsResponse: Sendable {
 
     var windows: [CodexRateLimitWindow] {
         selectedSnapshot.windows
+    }
+
+    var planType: CodexPlanType? {
+        selectedSnapshot.planType
     }
 }
 
