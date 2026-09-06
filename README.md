@@ -16,6 +16,16 @@ brew tap LikanLabs/tap
 brew install --cask usage-island
 ```
 
+After installing it, open it from Terminal with:
+
+```sh
+open -a "Usage Island"
+```
+
+You can also open `Usage Island` from the **Applications** folder in Finder.
+The app runs in the background and shows the indicator beside the notch; you do
+not need to keep Terminal open.
+
 The free release is signed locally but is not notarized with Apple. macOS may
 ask you to approve the app the first time you open it. The source and releases
 are available in the [Usage Island repository](https://github.com/LikanLabs/UsageIsland).

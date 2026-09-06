@@ -14,5 +14,14 @@ brew tap LikanLabs/tap
 brew install --cask usage-island
 ```
 
+After installing it, open it with:
+
+```sh
+open -a "Usage Island"
+```
+
+You can also open it from the **Applications** folder in Finder. The app runs
+in the background beside the notch.
+
 The cask should point only to releases from `LikanLabs/UsageIsland`. Do not
 put credentials, signing certificates, or notarization profiles in the tap.
