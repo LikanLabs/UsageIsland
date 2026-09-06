@@ -6,3 +6,5 @@ xcuserdata/
 *.xcuserstate
 .env
 .env.*
+
+dist/

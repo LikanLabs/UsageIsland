@@ -162,6 +162,16 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    public func suspendRefresh() {
+        invalidateRefresh()
+        providers = providers.map { snapshot in
+            var stale = snapshot
+            stale.freshness = .stale
+            return stale
+        }
+        connectionStates = connectionStates.mapValues { _ in .disconnected }
+    }
+
     public func stop() {
         invalidateRefresh()
         connectionStates = connectionStates.mapValues { _ in .disconnected }

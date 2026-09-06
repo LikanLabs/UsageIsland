@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app
+        env:
+          USAGE_ISLAND_ARCHS: arm64,x86_64
+          USAGE_ISLAND_VERSION: ${{ github.ref_name }}
+        run: |
+          USAGE_ISLAND_VERSION="${USAGE_ISLAND_VERSION#v}" ./Scripts/package-app.sh
+      - name: Package release
+        run: |
+          ditto -c -k --keepParent "dist/Usage Island.app" "dist/Usage-Island.zip"
+          shasum -a 256 "dist/Usage-Island.zip" > "dist/Usage-Island.zip.sha256"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/Usage-Island.zip \
+            dist/Usage-Island.zip.sha256 \
+            --title "Usage Island ${GITHUB_REF_NAME}" \
+            --generate-notes

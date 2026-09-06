@@ -7,18 +7,9 @@ struct UsageIslandPrototypeApp: App {
 
     var body: some Scene {
         Settings {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Usage Island Prototype")
-                    .font(.title2.weight(.semibold))
-                Text("Usa el Beacon para cambiar escenarios, layouts y solicitar acceso de Accessibility.")
-                    .foregroundStyle(.secondary)
-                Text("Este prototipo usa datos simulados; todavía no conecta proveedores reales.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(24)
-            .frame(width: 430)
+            EmptyView()
         }
+        .commands { CommandGroup(replacing: .appSettings) {} }
     }
 }
 
@@ -27,9 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model: AppModel
     private let codexUsageProvider: CodexUsageProvider?
     private let terminationReply: (Bool) -> Void
-    private let occupancyService = MenuBarOccupancyService()
-    private var islandController: IslandWindowController?
-    private var beaconController: BeaconController?
+    private var refreshController: UsageRefreshController?
+    private var islandController: CodexEdgeWindowController?
     private var initialRefreshTask: Task<Void, Never>?
     private var terminationTask: Task<Void, Never>?
     private var didBeginTermination = false
@@ -114,25 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             codexAdapter = UnavailableCodexUsageProvider()
         }
 
-        let claudeAdapter = DemoUsageProvider(
-            id: .claude,
-            scenario: .normal,
-            clock: clock
-        )
-        let openCodeAdapter = DemoUsageProvider(
-            id: .openCodeGo,
-            scenario: .normal,
-            clock: clock
-        )
-        let capturedAt = clock.now()
-        let initialSnapshots = [
-            claudeAdapter.snapshot(at: capturedAt),
-            openCodeAdapter.snapshot(at: capturedAt)
-        ]
         let model = makeModel(
-            providerAdapters: [claudeAdapter, codexAdapter, openCodeAdapter],
+            providerAdapters: [codexAdapter],
             clock: clock,
-            initialSnapshots: initialSnapshots,
+            initialSnapshots: [],
             initialAgents: []
         )
 
@@ -145,26 +120,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let island = IslandWindowController(model: model, occupancyService: occupancyService)
-        let beacon = BeaconController(model: model, allowsDemoScenarios: false)
-
-        beacon.onTogglePulse = { [weak island] in island?.togglePulse() }
-        beacon.onRefreshLayout = { [weak island] in island?.refreshLayout() }
-        beacon.onRequestAccessibility = { [weak island] in island?.requestAccessibilityPermission() }
-
+        let island = CodexEdgeWindowController(model: model)
         islandController = island
-        beaconController = beacon
         island.show()
         startInitialRefresh()
+        let refresh = UsageRefreshController(model: model)
+        refreshController = refresh
+        refresh.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        refreshController?.stop()
+        refreshController = nil
         initialRefreshTask?.cancel()
         initialRefreshTask = nil
         model.stop()
         islandController?.shutdown()
         islandController = nil
-        beaconController = nil
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -180,6 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         didBeginTermination = true
+        islandController?.shutdown()
+        islandController = nil
+        refreshController?.stop()
+        refreshController = nil
         initialRefreshTask?.cancel()
         initialRefreshTask = nil
         model.stop()

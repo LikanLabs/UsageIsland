@@ -8,17 +8,17 @@ import XCTest
 final class LiveCompositionTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
-    func testLiveCompositionSeedsOnlyClaudeAndOpenCodeAtOneCaptureTime() {
+    func testLiveCompositionStartsWithOnlyCodexAndNoInventedUsage() {
         let harness = makeLiveHarness()
 
-        XCTAssertEqual(harness.composition.model.providers.map(\.id), [.claude, .openCodeGo])
+        XCTAssertEqual(harness.composition.model.providers.map(\.id), [])
         XCTAssertEqual(
             Set(harness.composition.model.providers.map(\.capturedAt)),
-            [now]
+            []
         )
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.claude: .connected, .codex: .disconnected, .openCodeGo: .connected]
+            [.codex: .disconnected]
         )
         XCTAssertEqual(harness.composition.model.freshness(for: .codex), .unavailable)
     }
@@ -47,7 +47,7 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertTrue(harness.composition.codexUsageProvider === createdProvider)
     }
 
-    func testInitialRefreshAddsRealCodexAndPreservesDemoProviders() async {
+    func testInitialRefreshPublishesOnlyCodex() async {
         let gate = LiveTestGate()
         let harness = makeLiveHarness(accountGate: gate)
         let initial = harness.composition.model.providers
@@ -67,17 +67,9 @@ final class LiveCompositionTests: XCTestCase {
 
         XCTAssertEqual(
             harness.composition.model.providers.map(\.id),
-            [.claude, .codex, .openCodeGo]
+            [.codex]
         )
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .connected)
-        XCTAssertEqual(
-            harness.composition.model.providers.first(where: { $0.id == .claude })?.preferredWindow,
-            initial.first(where: { $0.id == .claude })?.preferredWindow
-        )
-        XCTAssertEqual(
-            harness.composition.model.providers.first(where: { $0.id == .openCodeGo })?.preferredWindow,
-            initial.first(where: { $0.id == .openCodeGo })?.preferredWindow
-        )
     }
 
     func testWeeklyOnlyCodexSnapshotAppearsAfterRefresh() async throws {
@@ -105,12 +97,12 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .connected)
     }
 
-    func testFirstCodexFailureKeepsOnlyImmediateDemoSnapshots() async {
+    func testFirstCodexFailureLeavesUsageUnavailable() async {
         let harness = makeLiveHarness(startError: JSONRPCError.transportClosed)
 
         await harness.composition.model.refreshUsage()
 
-        XCTAssertEqual(harness.composition.model.providers.map(\.id), [.claude, .openCodeGo])
+        XCTAssertEqual(harness.composition.model.providers.map(\.id), [])
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .failed)
         XCTAssertEqual(harness.composition.model.freshness(for: .codex), .unavailable)
     }
@@ -130,7 +122,7 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(staleCodex.windows, successfulCodex.windows)
         XCTAssertEqual(staleCodex.freshness, .stale)
         XCTAssertEqual(harness.composition.model.connectionStates[.codex], .failed)
-        XCTAssertEqual(harness.composition.model.providers.map(\.id), [.claude, .codex, .openCodeGo])
+        XCTAssertEqual(harness.composition.model.providers.map(\.id), [.codex])
     }
 
     func testMissingExecutableUsesUnavailableAdapterWithoutCreatingCodexProvider() async {
@@ -154,26 +146,26 @@ final class LiveCompositionTests: XCTestCase {
 
         await composition.model.refreshUsage()
 
-        XCTAssertEqual(composition.model.providers.map(\.id), [.claude, .openCodeGo])
+        XCTAssertEqual(composition.model.providers.map(\.id), [])
         XCTAssertEqual(composition.model.connectionStates[.codex], .failed)
         XCTAssertEqual(composition.model.freshness(for: .codex), .unavailable)
         let startCalls = await client.startCallCount()
         XCTAssertEqual(startCalls, 0)
     }
 
-    func testLivePriorityKeepsExistingV26OrderingBeforeAndAfterCodexAppears() async {
+    func testLivePriorityContainsOnlyCodexAfterRefresh() async {
         let harness = makeLiveHarness()
 
         XCTAssertEqual(
             harness.composition.model.prioritizedProviders.map(\.id),
-            [.claude, .openCodeGo]
+            []
         )
 
         await harness.composition.model.refreshUsage()
 
         XCTAssertEqual(
             harness.composition.model.prioritizedProviders.map(\.id),
-            [.claude, .codex, .openCodeGo]
+            [.codex]
         )
     }
 
@@ -295,7 +287,7 @@ final class LiveCompositionTests: XCTestCase {
         )
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.claude: .disconnected, .codex: .disconnected, .openCodeGo: .disconnected]
+            [.codex: .disconnected]
         )
         XCTAssertEqual(delegate.requestTermination(), .terminateNow)
         XCTAssertEqual(replies.values, [true])
@@ -317,7 +309,7 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(shutdownCalls, 1)
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.claude: .disconnected, .codex: .disconnected, .openCodeGo: .disconnected]
+            [.codex: .disconnected]
         )
     }
 

@@ -35,7 +35,9 @@ actor CodexUsageProvider: UsageProvider {
         let task: Task<Result<Void, CodexUsageError>, Never>
     }
 
-    private let client: any CodexUsageClient
+    private var client: any CodexUsageClient
+    private let makeReplacementClient: (@Sendable () -> any CodexUsageClient)?
+    private var needsRecovery = false
     private let clock: any UsageClock
     private let gate: CodexUsageFetchGate
     private let beforeReturningSnapshot: @Sendable () async throws -> Void
@@ -52,6 +54,7 @@ actor CodexUsageProvider: UsageProvider {
         clock: any UsageClock = SystemUsageClock()
     ) {
         client = CodexAppServerClient(configuration: configuration)
+        makeReplacementClient = { CodexAppServerClient(configuration: configuration) }
         self.clock = clock
         gate = CodexUsageFetchGate()
         beforeReturningSnapshot = {}
@@ -62,10 +65,12 @@ actor CodexUsageProvider: UsageProvider {
         client: any CodexUsageClient,
         clock: any UsageClock,
         gate: CodexUsageFetchGate = CodexUsageFetchGate(),
+        makeReplacementClient: (@Sendable () -> any CodexUsageClient)? = nil,
         beforeReturningSnapshot: @escaping @Sendable () async throws -> Void = {},
         didJoinShutdown: @escaping @Sendable () async -> Void = {}
     ) {
         self.client = client
+        self.makeReplacementClient = makeReplacementClient
         self.clock = clock
         self.gate = gate
         self.beforeReturningSnapshot = beforeReturningSnapshot
@@ -80,6 +85,7 @@ actor CodexUsageProvider: UsageProvider {
         var fetchID: UUID?
         do {
             try checkAvailable()
+            try await recoverIfNeeded()
             try await ensureStarted()
             try Task.checkCancellation()
             try checkAvailable()
@@ -104,6 +110,20 @@ actor CodexUsageProvider: UsageProvider {
             try checkAvailable()
             return snapshot
         } catch {
+            let normalized = Self.normalized(error)
+            // Cancelling an in-flight JSON-RPC request closes its transport.
+            // Normalization deliberately exposes CancellationError to callers,
+            // but the next refresh must still retire that client. Cancellation
+            // while waiting for startup/the gate does not invalidate a client.
+            if makeReplacementClient != nil, normalized is CancellationError,
+               let fetchID, activeFetch?.id == fetchID {
+                needsRecovery = true
+            }
+            if makeReplacementClient != nil,
+               let failure = normalized as? CodexUsageError,
+               case .appServerFailure = failure {
+                needsRecovery = true
+            }
             if let fetchID {
                 finishFetch(fetchID)
             }
@@ -111,7 +131,7 @@ actor CodexUsageProvider: UsageProvider {
                 await gate.release()
                 ownsPermit = false
             }
-            throw Self.normalized(error)
+            throw normalized
         }
     }
 
@@ -153,6 +173,20 @@ actor CodexUsageProvider: UsageProvider {
         case .failure(let error):
             throw error
         }
+    }
+
+    /// Runs under the fetch gate. Retire the old process before constructing a new
+    /// client, so each retry performs its own initialize/initialized handshake.
+    private func recoverIfNeeded() async throws {
+        guard needsRecovery, let makeReplacementClient else { return }
+        try await client.shutdown()
+        try Task.checkCancellation()
+        if case .stopped = state { throw CodexUsageError.stopped }
+        client = makeReplacementClient()
+        startupAttempt = nil
+        shutdownComplete = false
+        needsRecovery = false
+        state = .idle
     }
 
     private func ensureStarted() async throws {
@@ -240,7 +274,7 @@ actor CodexUsageProvider: UsageProvider {
         case .stopped:
             throw CodexUsageError.stopped
         case .failed(let error):
-            throw error
+            if !needsRecovery { throw error }
         default:
             return
         }
