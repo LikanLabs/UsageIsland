@@ -32,7 +32,7 @@ click it to open details. An open panel or context menu keeps the pill visible.
 Preferences apply immediately and persist after relaunch. The context menu offers
 refresh and quit. Quota refreshes every minute and can also be refreshed from the
 panel. Unavailable usage appears as a dash; stale readings retain their values with
-a dashed ring and a message in the detail panel. Ring color follows remaining quota: green above 50%, yellow above 25%, orange above 10%, and red at 10% or less. The percentage and filled arc continue to represent quota used.
+a dashed ring and a message in the detail panel. Ring color follows remaining quota: green above 50%, yellow above 25%, orange above 10%, and red at 10% or less. Settings can show either consumed or available percentage; the number and filled arc follow that choice.
 
 ## Build a local app
 
