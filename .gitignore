@@ -8,6 +8,7 @@ xcuserdata/
 .env.*
 
 dist/
+.claude/
 # >>> Comet managed project state >>>
 !/.comet/
 /.comet/*
