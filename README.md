@@ -4,10 +4,6 @@ Usage Island is a small native macOS app that shows Codex usage at the edge of
 the screen. It can sit on the left, right, or below the MacBook notch and opens
 a compact panel with the current quota and reset time.
 
-<p align="center">
-  <img src="Assets/Screenshots/usage-island-hero.png" alt="Usage Island showing Codex quota below the MacBook notch" width="100%">
-</p>
-
 The project is open source and distributed by the [LikanLabs GitHub
 organization](https://github.com/LikanLabs).
 
@@ -49,10 +45,6 @@ The percentage and ring use the same value. The ring changes from green to
 yellow, orange, and red as the remaining quota decreases. A stale reading keeps
 its last value and is marked in the panel instead of being replaced with a fake
 value.
-
-<p align="center">
-  <img src="Assets/Screenshots/usage-island-settings.png" alt="Usage Island appearance and position settings" width="560">
-</p>
 
 ## Build locally
 
