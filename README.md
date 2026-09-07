@@ -1,5 +1,11 @@
 # Usage Island
 
+[![CI](https://github.com/LikanLabs/UsageIsland/actions/workflows/ci.yml/badge.svg)](https://github.com/LikanLabs/UsageIsland/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/LikanLabs/UsageIsland?color=blue)](https://github.com/LikanLabs/UsageIsland/releases/latest)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)](https://www.apple.com/macos/)
+[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 Usage Island is a small native macOS app that shows Codex usage at the edge of
 the screen. It can sit on the left, right, or below the MacBook notch and opens
 a compact panel with the current quota and reset time.
@@ -26,9 +32,25 @@ You can also open `Usage Island` from the **Applications** folder in Finder.
 The app runs in the background and shows the indicator beside the notch; you do
 not need to keep Terminal open.
 
-The free release is signed locally but is not notarized with Apple. macOS may
-ask you to approve the app the first time you open it. The source and releases
-are available in the [Usage Island repository](https://github.com/LikanLabs/UsageIsland).
+### First launch on macOS
+
+The free release is signed locally but is not yet notarized by Apple, so macOS
+may block it the first time you open it. If the warning only offers **Move to
+Trash** and **Done**:
+
+1. Click **Done** — do not move the app to the Trash.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll down to **Security** and click **Open Anyway** next to Usage Island.
+4. Confirm with your password, then click **Open**.
+
+The **Open Anyway** option is available for about one hour after attempting to
+launch the app. This approval is normally required only once. See
+[Apple's instructions for opening a blocked app](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac)
+for more information.
+
+Only override this warning if you downloaded Usage Island from the
+[official repository](https://github.com/LikanLabs/UsageIsland) or its Homebrew
+tap and trust the source.
 
 ## Use
 
