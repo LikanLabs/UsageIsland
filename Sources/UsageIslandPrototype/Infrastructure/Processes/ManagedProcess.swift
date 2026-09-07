@@ -757,33 +757,31 @@ public actor ManagedProcess: JSONRPCTransport {
         let outputHandle = outputPipe.fileHandleForReading
         outputHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            let reachedEnd = data.isEmpty
+            let yieldError = reachedEnd ? nil : boundedOutput.yield(data)
+            if reachedEnd {
+                handle.readabilityHandler = nil
+            }
             Task {
                 await self?.noteStandardOutputReadability()
-            }
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                Task {
+                if reachedEnd {
                     await self?.standardOutputDidReachEnd()
+                } else if let yieldError {
+                    await self?.outputDidFail(with: yieldError)
                 }
-                return
-            }
-            guard let error = boundedOutput.yield(data) else {
-                return
-            }
-            Task {
-                await self?.outputDidFail(with: error)
             }
         }
 
         let errorHandle = errorPipe.fileHandleForReading
         errorHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            let reachedEnd = data.isEmpty
+            if reachedEnd {
+                handle.readabilityHandler = nil
+            }
             Task {
                 await self?.noteStandardErrorReadability()
-            }
-            if data.isEmpty {
-                handle.readabilityHandler = nil
-                Task {
+                if reachedEnd {
                     await self?.standardErrorDidReachEnd()
                 }
             }
