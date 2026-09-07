@@ -14,7 +14,6 @@ public final class AppModel: ObservableObject {
     @Published public var isPulseOpen = false
     @Published public var isPulsePresented = false
     @Published public var expandedProvider: ProviderID?
-    @Published public var scenario: DemoScenario = .normal
     @Published public private(set) var lastUpdatedAt: Date
     @Published public var adaptiveSpacingIsTrusted = false
     @Published public var islandIsVisible = true
@@ -28,8 +27,7 @@ public final class AppModel: ObservableObject {
         providerAdapters: [any UsageProvider],
         clock: any UsageClock,
         initialSnapshots: [UsageSnapshot],
-        initialAgents: [AgentSession]? = nil,
-        initialScenario: DemoScenario = .normal
+        initialAgents: [AgentSession] = []
     ) throws(AppModelConfigurationError) {
         let configuration = try Self.validateConfiguration(
             providerAdapters: providerAdapters,
@@ -38,34 +36,26 @@ public final class AppModel: ObservableObject {
         self.init(
             configuration: configuration,
             clock: clock,
-            initialAgents: initialAgents,
-            initialScenario: initialScenario
+            initialAgents: initialAgents
         )
     }
 
     private init(
         configuration: ValidatedAppModelConfiguration,
         clock: any UsageClock,
-        initialAgents: [AgentSession]?,
-        initialScenario: DemoScenario
+        initialAgents: [AgentSession]
     ) {
         self.clock = clock
         providerAdapters = configuration.providerAdapters
         providers = configuration.initialSnapshots
         connectionStates = configuration.connectionStates
-        scenario = initialScenario
         lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
-        if let initialAgents {
-            agents = initialAgents
-        } else {
-            applyAgents(for: initialScenario)
-        }
+        agents = initialAgents
     }
 
     static func empty(
         clock: any UsageClock,
-        initialAgents: [AgentSession]? = nil,
-        initialScenario: DemoScenario = .normal
+        initialAgents: [AgentSession] = []
     ) -> AppModel {
         AppModel(
             configuration: ValidatedAppModelConfiguration(
@@ -74,8 +64,7 @@ public final class AppModel: ObservableObject {
                 connectionStates: [:]
             ),
             clock: clock,
-            initialAgents: initialAgents,
-            initialScenario: initialScenario
+            initialAgents: initialAgents
         )
     }
 
@@ -113,25 +102,6 @@ public final class AppModel: ObservableObject {
 
     public func toggleProviderDetails(_ provider: ProviderID) {
         expandedProvider = expandedProvider == provider ? nil : provider
-    }
-
-    public func applyScenario(_ scenario: DemoScenario) {
-        let snapshots = DemoUsageProvider.snapshots(for: scenario, clock: clock)
-        let adapters = DemoUsageProvider.providerAdapters(for: scenario, clock: clock)
-        guard let configuration = try? Self.validateConfiguration(
-            providerAdapters: adapters,
-            initialSnapshots: snapshots
-        ) else {
-            return
-        }
-
-        invalidateRefresh()
-        self.scenario = scenario
-        providerAdapters = configuration.providerAdapters
-        providers = configuration.initialSnapshots
-        connectionStates = configuration.connectionStates
-        lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
-        applyAgents(for: scenario)
     }
 
     public func refreshUsage() async {
@@ -175,34 +145,6 @@ public final class AppModel: ObservableObject {
     public func stop() {
         invalidateRefresh()
         connectionStates = connectionStates.mapValues { _ in .disconnected }
-    }
-
-    private func applyAgents(for scenario: DemoScenario) {
-        let now = clock.now()
-
-        switch scenario {
-        case .normal:
-            agents = [
-                .init(provider: .claude, status: .running, project: "api-server", source: "Terminal", updatedAt: now),
-                .init(provider: .codex, status: .running, project: "usage-island", source: "Paseo", updatedAt: now)
-            ]
-
-        case .critical:
-            agents = [
-                .init(provider: .claude, status: .running, project: "agent-runtime", source: "Orca", updatedAt: now)
-            ]
-
-        case .waiting:
-            agents = [
-                .init(provider: .claude, status: .running, project: "api-server", source: "Paseo", updatedAt: now),
-                .init(provider: .codex, status: .waitingForApproval, project: "usage-island", source: "Orca", updatedAt: now)
-            ]
-
-        case .error:
-            agents = [
-                .init(provider: .codex, status: .failed, project: "usage-island", source: "Paseo", updatedAt: now)
-            ]
-        }
     }
 
     private func invalidateRefresh() {

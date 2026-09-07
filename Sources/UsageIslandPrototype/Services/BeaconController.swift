@@ -4,16 +4,14 @@ import Combine
 @MainActor
 public final class BeaconController: NSObject {
     private let model: AppModel
-    let allowsDemoScenarios: Bool
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private var cancellables: Set<AnyCancellable> = []
     public var onTogglePulse: (() -> Void)?
     public var onRefreshLayout: (() -> Void)?
     public var onRequestAccessibility: (() -> Void)?
 
-    public init(model: AppModel, allowsDemoScenarios: Bool = true) {
+    public init(model: AppModel) {
         self.model = model
-        self.allowsDemoScenarios = allowsDemoScenarios
         super.init()
         configureButton()
         observeModel()
@@ -34,10 +32,6 @@ public final class BeaconController: NSObject {
                 self?.updateIcon()
                 self?.rebuildMenu()
             }
-            .store(in: &cancellables)
-
-        model.$scenario
-            .sink { [weak self] _ in self?.rebuildMenu() }
             .store(in: &cancellables)
     }
 
@@ -77,20 +71,6 @@ public final class BeaconController: NSObject {
         open.target = self
         menu.addItem(open)
         menu.addItem(.separator())
-
-        if allowsDemoScenarios {
-            let scenarios = NSMenuItem(title: "Escenario", action: nil, keyEquivalent: "")
-            let scenarioMenu = NSMenu()
-            for scenario in Self.demoScenarios(whenAllowed: allowsDemoScenarios) {
-                let item = NSMenuItem(title: scenarioTitle(scenario), action: #selector(selectScenario(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = scenario.rawValue
-                item.state = model.scenario == scenario ? .on : .off
-                scenarioMenu.addItem(item)
-            }
-            scenarios.submenu = scenarioMenu
-            menu.addItem(scenarios)
-        }
 
         let layouts = NSMenuItem(title: "Layout", action: nil, keyEquivalent: "")
         let layoutMenu = NSMenu()
@@ -139,11 +119,6 @@ public final class BeaconController: NSObject {
         DispatchQueue.main.async { [weak self] in self?.rebuildMenu() }
     }
 
-    @objc private func selectScenario(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let scenario = DemoScenario(rawValue: raw) else { return }
-        model.applyScenario(scenario)
-    }
-
     @objc private func selectLayout(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let layout = WingPresentationMode(rawValue: raw) else { return }
         model.requestedLayout = layout
@@ -164,19 +139,6 @@ public final class BeaconController: NSObject {
 
     @objc private func quit() {
         NSApp.terminate(nil)
-    }
-
-    private func scenarioTitle(_ scenario: DemoScenario) -> String {
-        switch scenario {
-        case .normal: "Normal"
-        case .critical: "Cuota crítica"
-        case .waiting: "Espera aprobación"
-        case .error: "Error"
-        }
-    }
-
-    static func demoScenarios(whenAllowed allowsDemoScenarios: Bool) -> [DemoScenario] {
-        allowsDemoScenarios ? DemoScenario.allCases : []
     }
 
     private func layoutTitle(_ layout: WingPresentationMode) -> String {

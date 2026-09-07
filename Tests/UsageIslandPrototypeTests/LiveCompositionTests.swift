@@ -168,54 +168,35 @@ final class LiveCompositionTests: XCTestCase {
         )
     }
 
-    func testDefaultAppModelInitializerPreservesDemoAgents() throws {
+    func testDefaultAppModelInitializerDoesNotInventAgents() throws {
         let model = try AppModel(
-            providerAdapters: DemoUsageProvider.providerAdapters(
-                for: .normal,
-                clock: FixedLiveClock(now)
-            ),
+            providerAdapters: [],
             clock: FixedLiveClock(now),
-            initialSnapshots: DemoUsageProvider.snapshots(
-                for: .normal,
-                clock: FixedLiveClock(now)
-            )
+            initialSnapshots: []
         )
 
-        XCTAssertEqual(model.agents.count, 2)
-        XCTAssertEqual(model.agents.map(\.provider), [.claude, .codex])
+        XCTAssertTrue(model.agents.isEmpty)
     }
 
-    func testExplicitInitialAgentsAreUsedWithoutChangingDemoScenarioBehavior() throws {
+    func testExplicitInitialAgentsAreUsed() throws {
+        let agent = AgentSession(
+            provider: .codex,
+            status: .running,
+            project: "usage-island",
+            source: "Codex",
+            updatedAt: now
+        )
         let model = try AppModel(
             providerAdapters: [],
             clock: FixedLiveClock(now),
             initialSnapshots: [],
-            initialAgents: []
+            initialAgents: [agent]
         )
 
-        XCTAssertTrue(model.agents.isEmpty)
-
-        model.applyScenario(.waiting)
-
-        XCTAssertEqual(model.agents.count, 2)
-        XCTAssertEqual(model.scenario, .waiting)
+        XCTAssertEqual(model.agents, [agent])
     }
 
-    func testLiveBeaconHidesDemoScenarios() {
-        XCTAssertTrue(BeaconController.demoScenarios(whenAllowed: false).isEmpty)
-    }
-
-    func testDemoBeaconPreservesEveryScenario() {
-        let model = AppDelegate.makeDemoModel(clock: FixedLiveClock(now))
-
-        XCTAssertEqual(
-            BeaconController.demoScenarios(whenAllowed: true),
-            DemoScenario.allCases
-        )
-        XCTAssertFalse(model.agents.isEmpty)
-    }
-
-    func testPulseRefreshActionUsesLiveRefreshWithoutApplyingDemoScenario() throws {
+    func testPulseRefreshActionUsesLiveRefresh() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -226,7 +207,6 @@ final class LiveCompositionTests: XCTestCase {
         let source = try String(contentsOf: pulseURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains("Task { await model.refreshUsage() }"))
-        XCTAssertFalse(source.contains("model.applyScenario(model.scenario)"))
     }
 
     func testTerminationRepliesOnceAndShutsDownCodexOnceAcrossRepeatedRequests() async {

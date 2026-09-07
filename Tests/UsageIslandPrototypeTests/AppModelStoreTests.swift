@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 import XCTest
 
 @testable import UsageIslandPrototype
@@ -7,21 +6,6 @@ import XCTest
 @MainActor
 final class AppModelStoreTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
-
-    func testInitialStateIsSeededAndPreservesPriorityScore() {
-        let model = AppDelegate.makeDemoModel(clock: FixedStoreClock(now))
-
-        XCTAssertFalse(model.providers.isEmpty)
-        XCTAssertEqual(model.providers.count, 3)
-        XCTAssertEqual(
-            model.providers.first(where: { $0.id == .claude })?.priorityScore,
-            278
-        )
-        XCTAssertEqual(
-            model.providers.first(where: { $0.id == .codex })?.priorityScore,
-            302
-        )
-    }
 
     func testDuplicateProviderAdaptersReturnTypedConfigurationError() {
         let first = ControlledProvider(id: .codex, controller: ControlledResponses())
@@ -46,12 +30,11 @@ final class AppModelStoreTests: XCTestCase {
     }
 
     func testSnapshotWithoutAdapterReturnsTypedConfigurationError() {
-        let adapter = ControlledProvider(id: .codex, controller: ControlledResponses())
-        let orphaned = snapshot(id: .claude, remaining: 60, capturedAt: now)
+        let orphaned = snapshot(id: .codex, remaining: 60, capturedAt: now)
 
         assertConfigurationError(
-            .snapshotWithoutAdapter(.claude),
-            providerAdapters: [adapter],
+            .snapshotWithoutAdapter(.codex),
+            providerAdapters: [],
             initialSnapshots: [orphaned]
         )
     }
@@ -72,88 +55,21 @@ final class AppModelStoreTests: XCTestCase {
         let model = makeModel(providerAdapter: adapter, initialSnapshots: [initial])
 
         XCTAssertEqual(model.freshness(for: .codex), .stale)
-        XCTAssertEqual(model.freshness(for: .claude), .unavailable)
-    }
-
-    func testProductionCompositionCreatesConfiguredDemoModel() {
-        let model = AppDelegate.makeDemoModel(clock: FixedStoreClock(now))
-
-        XCTAssertEqual(model.providers.map(\.id), [.claude, .codex, .openCodeGo])
-        XCTAssertEqual(
-            model.connectionStates,
-            [.claude: .connected, .codex: .connected, .openCodeGo: .connected]
-        )
     }
 
     func testInvalidCompositionFallsBackToEmptySafeModel() {
-        let adapter = ControlledProvider(id: .codex, controller: ControlledResponses())
-        let orphaned = snapshot(id: .claude, remaining: 60, capturedAt: now)
+        let orphaned = snapshot(id: .codex, remaining: 60, capturedAt: now)
 
         let model = AppDelegate.makeModel(
-            providerAdapters: [adapter],
+            providerAdapters: [],
             clock: FixedStoreClock(now),
             initialSnapshots: [orphaned]
         )
 
         XCTAssertTrue(model.providers.isEmpty)
         XCTAssertTrue(model.connectionStates.isEmpty)
-        XCTAssertEqual(model.freshness(for: .claude), .unavailable)
+        XCTAssertEqual(model.freshness(for: .codex), .unavailable)
         XCTAssertEqual(model.lastUpdatedAt, now)
-    }
-
-    func testEveryScenarioPreservesV26PriorityOrder() {
-        let model = makeDemoModel()
-
-        let expectedOrders: [(DemoScenario, [ProviderID])] = [
-            (.normal, [.codex, .claude, .openCodeGo]),
-            (.critical, [.claude, .codex, .openCodeGo]),
-            (.waiting, [.codex, .claude, .openCodeGo]),
-            (.error, [.codex, .claude, .openCodeGo])
-        ]
-
-        for (scenario, expectedOrder) in expectedOrders {
-            model.applyScenario(scenario)
-            XCTAssertEqual(model.prioritizedProviders.map(\.id), expectedOrder)
-        }
-    }
-
-    func testApplyScenarioIsImmediateAndKeepsAllDemoAgentsUnchanged() {
-        let model = makeDemoModel()
-        let expectedAgents: [(DemoScenario, [String])] = [
-            (
-                .normal,
-                [
-                    "claude|running|api-server|Terminal",
-                    "codex|running|usage-island|Paseo"
-                ]
-            ),
-            (
-                .critical,
-                ["claude|running|agent-runtime|Orca"]
-            ),
-            (
-                .waiting,
-                [
-                    "claude|running|api-server|Paseo",
-                    "codex|waitingForApproval|usage-island|Orca"
-                ]
-            ),
-            (
-                .error,
-                ["codex|failed|usage-island|Paseo"]
-            )
-        ]
-
-        for (scenario, expected) in expectedAgents {
-            model.applyScenario(scenario)
-            XCTAssertEqual(agentSignatures(model.agents), expected)
-        }
-
-        model.applyScenario(.waiting)
-        XCTAssertEqual(
-            model.providers.first(where: { $0.id == .codex })?.preferredWindow.remainingPercent,
-            41
-        )
     }
 
     func testSuccessfulRefreshTransitionsFromConnectingToConnected() async {
@@ -213,24 +129,6 @@ final class AppModelStoreTests: XCTestCase {
         XCTAssertEqual(model.freshness(for: .codex), .unavailable)
     }
 
-    func testApplyingScenarioInvalidatesInFlightRefresh() async {
-        let controller = ControlledResponses()
-        let adapter = ControlledProvider(id: .codex, controller: controller)
-        let initial = snapshot(id: .codex, remaining: 60, capturedAt: now)
-        let model = makeModel(providerAdapter: adapter, initialSnapshots: [initial])
-        let replacement = snapshot(id: .codex, remaining: 10, capturedAt: now.addingTimeInterval(10))
-
-        let task = Task { await model.refreshUsage() }
-        await controller.waitForRequestCount(1)
-        model.applyScenario(.critical)
-        let scenarioSnapshots = model.providers
-        await controller.resolve(request: 0, with: .success(replacement))
-        await task.value
-
-        XCTAssertEqual(model.providers, scenarioSnapshots)
-        XCTAssertEqual(model.scenario, .critical)
-    }
-
     func testCancellingAwaitingCallerCancelsManagedRefreshAndDoesNotPublish() async {
         let controller = ControlledResponses()
         let adapter = ControlledProvider(id: .codex, controller: controller)
@@ -272,70 +170,6 @@ final class AppModelStoreTests: XCTestCase {
         XCTAssertEqual(model.lastUpdatedAt, newer.capturedAt)
     }
 
-    func testMismatchedSnapshotIdentityIsHandledAsProviderFailure() async {
-        let controller = ControlledResponses()
-        let adapter = ControlledProvider(id: .codex, controller: controller)
-        let initial = snapshot(id: .codex, remaining: 60, capturedAt: now)
-        let mismatched = snapshot(id: .claude, remaining: 5, capturedAt: now)
-        let model = makeModel(providerAdapter: adapter, initialSnapshots: [initial])
-
-        let task = Task { await model.refreshUsage() }
-        await controller.waitForRequestCount(1)
-        await controller.resolve(request: 0, with: .success(mismatched))
-        await task.value
-
-        XCTAssertEqual(model.providers.count, 1)
-        XCTAssertEqual(model.providers[0].id, .codex)
-        XCTAssertEqual(model.providers[0].preferredWindow, initial.preferredWindow)
-        XCTAssertEqual(model.providers[0].freshness, .stale)
-        XCTAssertEqual(model.connectionStates[.codex], .failed)
-    }
-
-    func testMixedRefreshPublishesCompleteSnapshotArrayOnlyAfterAllAdaptersSettle() async {
-        let codexController = ControlledResponses()
-        let claudeController = ControlledResponses()
-        let codexAdapter = ControlledProvider(id: .codex, controller: codexController)
-        let claudeAdapter = ControlledProvider(id: .claude, controller: claudeController)
-        let initialClaude = snapshot(id: .claude, remaining: 70, capturedAt: now)
-        let initialCodex = snapshot(id: .codex, remaining: 60, capturedAt: now)
-        let refreshedCodex = snapshot(
-            id: .codex,
-            remaining: 20,
-            capturedAt: now.addingTimeInterval(10)
-        )
-        let model = makeModel(
-            providerAdapters: [claudeAdapter, codexAdapter],
-            initialSnapshots: [initialClaude, initialCodex]
-        )
-        var providerPublications: [[UsageSnapshot]] = []
-        let subscription = model.$providers
-            .dropFirst()
-            .sink { providerPublications.append($0) }
-
-        let task = Task { await model.refreshUsage() }
-        await codexController.waitForRequestCount(1)
-        await claudeController.waitForRequestCount(1)
-        await codexController.resolve(request: 0, with: .success(refreshedCodex))
-        await codexController.waitForDeliveryCount(1)
-
-        XCTAssertTrue(providerPublications.isEmpty)
-
-        await claudeController.resolve(request: 0, with: .failure)
-        await task.value
-
-        XCTAssertEqual(providerPublications.count, 1)
-        XCTAssertEqual(providerPublications[0].map(\.id), [.claude, .codex])
-        XCTAssertEqual(
-            providerPublications[0][0].preferredWindow,
-            initialClaude.preferredWindow
-        )
-        XCTAssertEqual(providerPublications[0][0].freshness, .stale)
-        XCTAssertEqual(providerPublications[0][1], refreshedCodex)
-        XCTAssertEqual(model.connectionStates[.claude], .failed)
-        XCTAssertEqual(model.connectionStates[.codex], .connected)
-        withExtendedLifetime(subscription) {}
-    }
-
     func testStopCancelsActiveRefreshAndInvalidatesItsResult() async {
         let controller = ControlledResponses()
         let adapter = ControlledProvider(id: .codex, controller: controller)
@@ -356,10 +190,6 @@ final class AppModelStoreTests: XCTestCase {
         XCTAssertEqual(model.connectionStates[.codex], .disconnected)
         XCTAssertNotEqual(model.providers[0].preferredWindow.remainingPercent, 5)
         XCTAssertTrue(observedCancellation)
-    }
-
-    private func makeDemoModel() -> AppModel {
-        AppDelegate.makeDemoModel(clock: FixedStoreClock(now))
     }
 
     private func makeModel(
@@ -409,12 +239,6 @@ final class AppModelStoreTests: XCTestCase {
             isActivelyUsed: false,
             capturedAt: capturedAt
         )
-    }
-
-    private func agentSignatures(_ agents: [AgentSession]) -> [String] {
-        agents.map {
-            "\($0.provider.rawValue)|\($0.status.rawValue)|\($0.project)|\($0.source)"
-        }
     }
 
     private func assertConfigurationError(

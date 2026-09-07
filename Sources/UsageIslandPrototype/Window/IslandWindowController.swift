@@ -165,10 +165,10 @@ public final class IslandWindowController {
       .sink { [weak self] _ in self?.refreshLayout() }
       .store(in: &cancellables)
 
-    Publishers.CombineLatest3(model.$providers, model.$agents, model.$scenario)
+    Publishers.CombineLatest(model.$providers, model.$agents)
       .dropFirst()
       .debounce(for: .milliseconds(80), scheduler: RunLoop.main)
-      .sink { [weak self] _, _, _ in self?.refreshLayout() }
+      .sink { [weak self] _, _ in self?.refreshLayout() }
       .store(in: &cancellables)
 
     model.$isPulseOpen

@@ -1,27 +1,13 @@
 import Foundation
 
 public enum ProviderID: String, CaseIterable, Hashable, Identifiable, Sendable {
-    case claude
     case codex
-    case openCodeGo
 
     public var id: String { rawValue }
 
-    public var displayName: String {
-        switch self {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        case .openCodeGo: "OpenCode Go"
-        }
-    }
+    public var displayName: String { "Codex" }
 
-    public var compactSymbol: String {
-        switch self {
-        case .claude: "✳"
-        case .codex: "◈"
-        case .openCodeGo: "○"
-        }
-    }
+    public var compactSymbol: String { "◈" }
 }
 
 public enum DataFreshness: Equatable, Sendable {
