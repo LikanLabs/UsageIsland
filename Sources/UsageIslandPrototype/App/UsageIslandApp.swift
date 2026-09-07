@@ -16,7 +16,7 @@ struct UsageIslandPrototypeApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model: AppModel
-    private let codexUsageProvider: CodexUsageProvider?
+    private let codexUsageProvider: LocatingCodexUsageProvider
     private let terminationReply: (Bool) -> Void
     private var refreshController: UsageRefreshController?
     private var islandController: CodexEdgeWindowController?
@@ -83,29 +83,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func makeLiveComposition(
         clock: any UsageClock,
         locator: ExecutableLocator,
-        makeCodexProvider: (
+        makeCodexProvider: @escaping @Sendable (
             CodexAppServerConfiguration,
             any UsageClock
         ) -> CodexUsageProvider = { configuration, clock in
             CodexUsageProvider(configuration: configuration, clock: clock)
         }
     ) -> LiveComposition {
-        let codexUsageProvider: CodexUsageProvider?
-        let codexAdapter: any UsageProvider
-        if let executableURL = try? locator.locate("codex") {
-            let provider = makeCodexProvider(
-                CodexAppServerConfiguration(executableURL: executableURL),
-                clock
-            )
-            codexUsageProvider = provider
-            codexAdapter = provider
-        } else {
-            codexUsageProvider = nil
-            codexAdapter = UnavailableCodexUsageProvider()
-        }
-
+        let provider = LocatingCodexUsageProvider(
+            locator: locator,
+            clock: clock,
+            makeCodexProvider: makeCodexProvider
+        )
         let model = makeModel(
-            providerAdapters: [codexAdapter],
+            providerAdapters: [provider],
             clock: clock,
             initialSnapshots: [],
             initialAgents: []
@@ -113,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         return LiveComposition(
             model: model,
-            codexUsageProvider: codexUsageProvider
+            codexUsageProvider: provider
         )
     }
 
@@ -162,9 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let provider = codexUsageProvider
         terminationTask = Task { [self] in
-            if let provider {
-                try? await provider.shutdown()
-            }
+            try? await provider.shutdown()
             finishTermination()
             terminationTask = nil
         }
@@ -203,13 +192,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct LiveComposition {
     let model: AppModel
-    let codexUsageProvider: CodexUsageProvider?
-}
-
-private struct UnavailableCodexUsageProvider: UsageProvider {
-    let id: ProviderID = .codex
-
-    func fetchUsage() async throws -> UsageSnapshot {
-        throw CodexUsageError.appServerFailure(.executableUnavailable)
-    }
+    let codexUsageProvider: LocatingCodexUsageProvider
 }

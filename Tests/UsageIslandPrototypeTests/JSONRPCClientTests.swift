@@ -158,6 +158,51 @@ final class JSONRPCClientTests: XCTestCase {
         await assertTask(requestTask, throws: .malformedJSON)
     }
 
+    func testMalformedLineThenValidResponseInSameChunkFailsPendingRequest() async throws {
+        let transport = FakeJSONRPCTransport()
+        let client = JSONRPCClient(transport: transport)
+        try await client.start()
+        let requestTask = makeTrackedTask {
+            try await client.request(method: "pending")
+        }
+        let outbound = try decodeOutbound(
+            try await transport.dataSent(at: 0)
+        )
+        var payload = Data("not json\n".utf8)
+        payload.append(
+            try successResponse(
+                id: XCTUnwrap(outbound.id),
+                result: .string("accepted")
+            )
+        )
+
+        await transport.emit(payload)
+
+        await assertTask(requestTask, throws: .malformedJSON)
+    }
+
+    func testMalformedLineThenValidResponseInLaterChunkFailsPendingRequest() async throws {
+        let transport = FakeJSONRPCTransport()
+        let client = JSONRPCClient(transport: transport)
+        try await client.start()
+        let requestTask = makeTrackedTask {
+            try await client.request(method: "pending")
+        }
+        let outbound = try decodeOutbound(
+            try await transport.dataSent(at: 0)
+        )
+
+        await transport.emitLine("not json")
+        await transport.emit(
+            try successResponse(
+                id: XCTUnwrap(outbound.id),
+                result: .string("accepted")
+            )
+        )
+
+        await assertTask(requestTask, throws: .malformedJSON)
+    }
+
     func testOversizedLineFailsEveryPendingRequestWithTypedError() async throws {
         let transport = FakeJSONRPCTransport()
         let client = JSONRPCClient(transport: transport, maximumLineSize: 16)
@@ -170,6 +215,38 @@ final class JSONRPCClientTests: XCTestCase {
         await transport.emit(Data(repeating: 0x61, count: 17))
 
         await assertTask(requestTask, throws: .responseTooLarge(limit: 16))
+    }
+
+    func testDrainingNotificationsKeepsRequestsWorkingPastDefaultBuffer() async throws {
+        let transport = FakeJSONRPCTransport()
+        let client = JSONRPCClient(transport: transport)
+        try await client.start()
+        let drainTask = Task {
+            let notifications = await client.notifications()
+            for try await _ in notifications {}
+        }
+        for index in 1...101 {
+            await transport.emitLine(#"{"method":"unused/\#(index)"}"#)
+        }
+
+        let requestTask = makeTrackedTask {
+            try await client.request(method: "after/notifications")
+        }
+        let outbound = try decodeOutbound(
+            try await transport.dataSent(at: 0)
+        )
+        await transport.emit(
+            try successResponse(
+                id: XCTUnwrap(outbound.id),
+                result: .string("ok")
+            )
+        )
+
+        let result = try await boundedValue(of: requestTask)
+        XCTAssertEqual(result, .string("ok"))
+        try await client.shutdown()
+        drainTask.cancel()
+        _ = try? await drainTask.value
     }
 
     func testFragmentedJSONLineIsReassembledBeforeDecoding() async throws {

@@ -543,6 +543,7 @@ public actor JSONRPCClient {
                 && receiveBuffer[receiveBuffer.index(before: newline)] == 0x0D
             let lineSize = rawLineSize - (hasCarriageReturn ? 1 : 0)
             guard lineSize <= maximumLineSize else {
+                receiveBuffer.removeAll(keepingCapacity: false)
                 throw JSONRPCError.responseTooLarge(limit: maximumLineSize)
             }
 
@@ -552,7 +553,12 @@ public actor JSONRPCClient {
                 line.removeLast()
             }
             if !line.isEmpty {
-                try handle(JSONRPCMessageCodec.decodeIncoming(line))
+                do {
+                    try handle(JSONRPCMessageCodec.decodeIncoming(line))
+                } catch {
+                    receiveBuffer.removeAll(keepingCapacity: false)
+                    throw error
+                }
             }
         }
 
@@ -595,7 +601,7 @@ public actor JSONRPCClient {
             return
         }
 
-        if !receiveBuffer.isEmpty {
+        if !receiveBuffer.isEmpty, isCleanTransportEOF(error) {
             do {
                 var line = receiveBuffer
                 receiveBuffer.removeAll(keepingCapacity: false)
@@ -621,11 +627,20 @@ public actor JSONRPCClient {
                 try? await awaitTransportShutdown()
                 return
             }
+        } else if !isCleanTransportEOF(error) {
+            receiveBuffer.removeAll(keepingCapacity: false)
         }
 
         close(with: error)
         beginTransportShutdown()
         try? await awaitTransportShutdown()
+    }
+
+    private func isCleanTransportEOF(_ error: JSONRPCError) -> Bool {
+        if case .transportClosed = error {
+            return true
+        }
+        return false
     }
 
     private func close(with error: JSONRPCError) {

@@ -342,6 +342,9 @@ private actor RecoveryFixtureClient: CodexUsageClient {
         starts += 1
         if startFails { throw JSONRPCError.transportClosed }
     }
+    func notifications() -> AsyncThrowingStream<JSONRPCNotification, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
     func request(method: String, params: JSONValue?) async throws -> JSONValue {
         requests += 1
         if requests == 1, let requestGate {

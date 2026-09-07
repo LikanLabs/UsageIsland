@@ -83,6 +83,49 @@ final class ManagedProcessTests: XCTestCase {
         }
     }
 
+    func testStdoutEOFUnregistersHandlerWhileChildStaysAlive() async throws {
+        let process = ManagedProcess(
+            configuration: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "exec 1>&-; exec sleep 1"]
+            ),
+            shutdownScheduler: ControlledTimeoutScheduler()
+        )
+        try await process.start()
+        try await waitUntilReadability(process) { $0.stdoutEOF >= 1 }
+        let first = await process.readabilityProbe()
+        try await Task.sleep(for: .milliseconds(250))
+        let second = await process.readabilityProbe()
+
+        XCTAssertEqual(first.stdoutEOF, 1)
+        XCTAssertEqual(second.stdoutEOF, 1)
+        XCTAssertEqual(first.stdout, second.stdout)
+        XCTAssertLessThan(first.stdout, 8)
+        try await process.shutdown()
+    }
+
+    func testStderrEOFUnregistersHandlerWhileChildStaysAlive() async throws {
+        let process = ManagedProcess(
+            configuration: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "exec 2>&-; exec sleep 1"]
+            ),
+            shutdownScheduler: ControlledTimeoutScheduler()
+        )
+        try await process.start()
+        try await waitUntilReadability(process) { $0.stderrEOF >= 1 }
+        let first = await process.readabilityProbe()
+        try await Task.sleep(for: .milliseconds(250))
+        let second = await process.readabilityProbe()
+
+        XCTAssertEqual(first.stderrEOF, 1)
+        XCTAssertEqual(second.stderrEOF, 1)
+        XCTAssertEqual(first.stderr, second.stderr)
+        XCTAssertLessThan(first.stderr, 8)
+        XCTAssertEqual(first.stdoutEOF, 0)
+        try await process.shutdown()
+    }
+
     func testRealFullPipeShutdownTerminatesOwnedNonReadingChild() async throws {
         let executable = "/usr/bin/tail"
         guard FileManager.default.isExecutableFile(atPath: executable) else {
@@ -956,6 +999,25 @@ final class ManagedProcessTests: XCTestCase {
                 await sink.abort()
             }
         )
+    }
+
+    private func waitUntilReadability(
+        _ process: ManagedProcess,
+        timeout: Duration = .seconds(2),
+        condition: @Sendable (
+            (stdout: Int, stderr: Int, stdoutEOF: Int, stderrEOF: Int)
+        ) -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            let probe = await process.readabilityProbe()
+            if condition(probe) {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let probe = await process.readabilityProbe()
+        XCTFail("Readability probe condition not reached: \(probe)")
     }
 
     private func withOuterTimeout(

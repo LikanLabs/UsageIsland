@@ -672,6 +672,10 @@ public actor ManagedProcess: JSONRPCTransport {
     private var standardError: FileHandle?
     private var observedExitStatus: Int32?
     private var standardOutputReachedEnd = false
+    private var standardOutputReadabilityInvocations = 0
+    private var standardErrorReadabilityInvocations = 0
+    private var standardOutputEOFInvocations = 0
+    private var standardErrorEOFInvocations = 0
     private var inputWriterTerminationError: JSONRPCError?
     private var shutdownTask: Task<Void, Error>?
 
@@ -753,23 +757,34 @@ public actor ManagedProcess: JSONRPCTransport {
         let outputHandle = outputPipe.fileHandleForReading
         outputHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty {
-                Task {
-                    await self?.standardOutputDidReachEnd()
-                }
-                return
-            }
-            guard let error = boundedOutput.yield(data) else {
-                return
+            let reachedEnd = data.isEmpty
+            let yieldError = reachedEnd ? nil : boundedOutput.yield(data)
+            if reachedEnd {
+                handle.readabilityHandler = nil
             }
             Task {
-                await self?.outputDidFail(with: error)
+                await self?.noteStandardOutputReadability()
+                if reachedEnd {
+                    await self?.standardOutputDidReachEnd()
+                } else if let yieldError {
+                    await self?.outputDidFail(with: yieldError)
+                }
             }
         }
 
         let errorHandle = errorPipe.fileHandleForReading
-        errorHandle.readabilityHandler = { handle in
-            _ = handle.availableData
+        errorHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            let reachedEnd = data.isEmpty
+            if reachedEnd {
+                handle.readabilityHandler = nil
+            }
+            Task {
+                await self?.noteStandardErrorReadability()
+                if reachedEnd {
+                    await self?.standardErrorDidReachEnd()
+                }
+            }
         }
 
         let exitMonitor = self.exitMonitor
@@ -931,6 +946,20 @@ public actor ManagedProcess: JSONRPCTransport {
 
     func completedInputWriteError() -> JSONRPCError? {
         inputWriterTerminationError
+    }
+
+    func readabilityProbe() -> (
+        stdout: Int,
+        stderr: Int,
+        stdoutEOF: Int,
+        stderrEOF: Int
+    ) {
+        (
+            standardOutputReadabilityInvocations,
+            standardErrorReadabilityInvocations,
+            standardOutputEOFInvocations,
+            standardErrorEOFInvocations
+        )
     }
 
     private func performShutdown(from initialState: State) async throws {
@@ -1119,11 +1148,24 @@ public actor ManagedProcess: JSONRPCTransport {
         await completeObservedExit(status: status)
     }
 
+    private func noteStandardOutputReadability() {
+        standardOutputReadabilityInvocations += 1
+    }
+
+    private func noteStandardErrorReadability() {
+        standardErrorReadabilityInvocations += 1
+    }
+
     private func standardOutputDidReachEnd() async {
+        standardOutputEOFInvocations += 1
         standardOutputReachedEnd = true
         if let observedExitStatus {
             await completeObservedExit(status: observedExitStatus)
         }
+    }
+
+    private func standardErrorDidReachEnd() {
+        standardErrorEOFInvocations += 1
     }
 
     private func completeObservedExit(status: Int32) async {

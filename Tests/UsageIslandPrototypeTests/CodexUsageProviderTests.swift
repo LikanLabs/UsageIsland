@@ -440,8 +440,23 @@ final class CodexUsageProviderTests: XCTestCase {
         }
     }
 
+    func testUnusedNotificationsAreDrainedSoLaterFetchesStillSucceed() async throws {
+        let client = NotificationFloodCodexClient()
+        let provider = makeProvider(client: client)
+
+        let first = try await provider.fetchUsage()
+        await client.emitUnusedNotifications(120)
+        let second = try await provider.fetchUsage()
+        try await provider.shutdown()
+
+        XCTAssertEqual(first.capturedAt, fixedDate)
+        XCTAssertEqual(second.capturedAt, fixedDate)
+        let shutdownCalls = await client.shutdownCallCount()
+        XCTAssertEqual(shutdownCalls, 1)
+    }
+
     private func makeProvider(
-        client: FakeCodexUsageClient,
+        client: any CodexUsageClient,
         gate: CodexUsageFetchGate = CodexUsageFetchGate(),
         beforeReturningSnapshot: @escaping @Sendable () async throws -> Void = {},
         didJoinShutdown: @escaping @Sendable () async -> Void = {}
@@ -465,6 +480,64 @@ private struct FixedUsageClock: UsageClock {
 
     func now() -> Date {
         nowValue
+    }
+}
+
+private actor NotificationFloodCodexClient: CodexUsageClient {
+    private let pair = AsyncThrowingStream<JSONRPCNotification, Error>.makeStream()
+    private var shutdownCalls = 0
+
+    func start() async {}
+
+    func notifications() -> AsyncThrowingStream<JSONRPCNotification, Error> {
+        pair.stream
+    }
+
+    func request(method: String, params: JSONValue?) async throws -> JSONValue {
+        if method == "account/read" {
+            return .object([
+                "requiresOpenaiAuth": .bool(true),
+                "account": .object([
+                    "type": .string("chatgpt"),
+                    "email": .null,
+                    "planType": .string("plus")
+                ])
+            ])
+        }
+        if method == "account/rateLimits/read" {
+            return .object([
+                "rateLimits": .object([
+                    "primary": .object([
+                        "windowDurationMins": .integer(300),
+                        "usedPercent": .integer(40),
+                        "resetsAt": .integer(10_000)
+                    ]),
+                    "secondary": .object([
+                        "windowDurationMins": .integer(10_080),
+                        "usedPercent": .integer(60),
+                        "resetsAt": .null
+                    ])
+                ])
+            ])
+        }
+        throw JSONRPCError.remoteError(code: -32_601)
+    }
+
+    func emitUnusedNotifications(_ count: Int) {
+        for index in 0..<count {
+            _ = pair.continuation.yield(
+                JSONRPCNotification(method: "unused/\(index)", params: nil)
+            )
+        }
+    }
+
+    func shutdown() async {
+        shutdownCalls += 1
+        pair.continuation.finish()
+    }
+
+    func shutdownCallCount() -> Int {
+        shutdownCalls
     }
 }
 
@@ -512,6 +585,10 @@ private actor FakeCodexUsageClient: CodexUsageClient {
         if let startError {
             throw startError
         }
+    }
+
+    func notifications() -> AsyncThrowingStream<JSONRPCNotification, Error> {
+        AsyncThrowingStream { $0.finish() }
     }
 
     func request(
