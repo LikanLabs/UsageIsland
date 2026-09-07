@@ -3,6 +3,7 @@ import Foundation
 protocol CodexUsageClient: Sendable {
     func start() async throws
     func request(method: String, params: JSONValue?) async throws -> JSONValue
+    func notifications() async throws -> AsyncThrowingStream<JSONRPCNotification, Error>
     func shutdown() async throws
 }
 
@@ -48,6 +49,7 @@ actor CodexUsageProvider: UsageProvider {
     private var activeFetch: ActiveFetch?
     private var shutdownAttempt: ShutdownAttempt?
     private var shutdownComplete = false
+    private var notificationDrainTask: Task<Void, Never>?
 
     init(
         configuration: CodexAppServerConfiguration,
@@ -167,7 +169,9 @@ actor CodexUsageProvider: UsageProvider {
         }
 
         await didJoinShutdown()
-        switch await attempt.task.value {
+        let result = await attempt.task.value
+        await joinNotificationDrain()
+        switch result {
         case .success:
             return
         case .failure(let error):
@@ -180,6 +184,7 @@ actor CodexUsageProvider: UsageProvider {
     private func recoverIfNeeded() async throws {
         guard needsRecovery, let makeReplacementClient else { return }
         try await client.shutdown()
+        await joinNotificationDrain()
         try Task.checkCancellation()
         if case .stopped = state { throw CodexUsageError.stopped }
         client = makeReplacementClient()
@@ -227,6 +232,7 @@ actor CodexUsageProvider: UsageProvider {
             if case .starting(let id) = state, id == attempt.id {
                 startupAttempt = nil
                 state = .started
+                startNotificationDrain()
             }
         } catch is CancellationError {
             throw CancellationError()
@@ -278,6 +284,27 @@ actor CodexUsageProvider: UsageProvider {
         default:
             return
         }
+    }
+
+    private func startNotificationDrain() {
+        guard notificationDrainTask == nil else {
+            return
+        }
+        let client = self.client
+        notificationDrainTask = Task.detached {
+            do {
+                let stream = try await client.notifications()
+                for try await _ in stream {}
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func joinNotificationDrain() async {
+        let task = notificationDrainTask
+        notificationDrainTask = nil
+        await task?.value
     }
 
     private func finishFetch(_ id: UUID) {

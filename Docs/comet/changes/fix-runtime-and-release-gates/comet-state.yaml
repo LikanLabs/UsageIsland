@@ -1,0 +1,869 @@
+schema: comet.native.v4
+name: fix-runtime-and-release-gates
+language: en
+phase: archive
+status: active
+state_version: 7
+brief: brief.md
+spec_changes:
+  - capability: codex-executable-recovery
+    operation: create
+    source: specs/codex-executable-recovery/spec.md
+  - capability: codex-unused-notifications
+    operation: create
+    source: specs/codex-unused-notifications/spec.md
+  - capability: jsonrpc-protocol-failure
+    operation: create
+    source: specs/jsonrpc-protocol-failure/spec.md
+  - capability: process-stdio-eof
+    operation: create
+    source: specs/process-stdio-eof/spec.md
+  - capability: release-test-gate
+    operation: create
+    source: specs/release-test-gate/spec.md
+workspace:
+  isolation: worktree
+  change_branch: comet/fix-runtime-and-release-gates
+  target_branch: main
+  finish: pull-request
+loop:
+  stage: archive-ready
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: archive
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "Child `/bin/sh` closes stdout (`exec 1>&-; sleep …`) while still alive:
+      stdout EOF is handled once, the stdout handler is unregistered, shutdown
+      still completes. Repeat independently for stderr (`exec 2>&-; sleep …`)."
+    result: passed
+    reason:
+      text: ManagedProcessTests.testStdoutEOFUnregistersHandlerWhileChildStaysAlive
+        and testStderrEOFUnregistersHandlerWhileChildStaysAlive passed; handlers
+        nil at empty availableData.
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: Count handler invocations with bounded instrumentation, not a CPU-time
+      threshold.
+    result: passed
+    reason:
+      text: Tests use readabilityProbe call/EOF counts, not CPU-time thresholds; swift
+        test passed.
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: Live composition starts with Codex missing. One refresh fails. The locator
+      then succeeds. The next refresh creates the real provider and does not
+      publish demo snapshots. The app composition is not rebuilt.
+    result: passed
+    reason:
+      text: LiveCompositionTests.testMissingCodexBecomesAvailableOnLaterRefreshWithoutRebuildingComposition
+        passed; LocatingCodexUsageProvider locates on each fetchUsage.
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: Pending request id 1 receives one chunk `not
+      json\n{"id":1,"result":"accepted"}\n`. The request fails. It does not
+      return `accepted`. The same failure occurs when the malformed line and the
+      later response arrive in separate chunks.
+    result: passed
+    reason:
+      text: JSONRPCClientTests.testMalformedLineThenValidResponseInSameChunkFailsPendingRequest
+        and ...LaterChunk... passed; request does not return accepted.
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A final valid JSON-RPC line without a trailing newline at clean EOF still
+      completes the pending request.
+    result: passed
+    reason:
+      text: JSONRPCClientTests.testValidFinalLineWithoutNewlineIsDecodedAtEndOfStream
+        passed; readerEnded last-line path only on transportClosed.
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: Production polling with more than 100 valid unused notifications still
+      completes later `request` calls. Shutdown still finishes the client.
+    result: passed
+    reason:
+      text: CodexUsageProviderTests.testUnusedNotificationsAreDrainedSoLaterFetchesStillSucceed
+        passed; drain Task.detached drops notifications.
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "`.github/workflows/release.yml` runs the existing test and resilience
+      commands on the tagged commit before `Scripts/package-app.sh` and `gh
+      release create`. A deliberate test failure must skip package and publish.
+      Do not prove this by publishing a broken GitHub release."
+    result: passed
+    reason:
+      text: ReleaseWorkflowTests.testReleaseJobRunsTestsAndResilienceBeforePackageAndPublish
+        passed; YAML has no continue-on-error; GitHub Actions fails the job on a
+        failed step.
+      truncated: false
+  - id: A8
+    source: specs/codex-executable-recovery/spec.md
+    text: A missing Codex CLI at application launch is a recoverable condition, not
+      a permanent provider identity for that process lifetime.
+    result: passed
+    reason:
+      text: makeLiveComposition always installs LocatingCodexUsageProvider; locate
+        runs on fetchUsage, not as a permanent UnavailableCodexUsageProvider.
+      truncated: false
+  - id: A9
+    source: specs/codex-executable-recovery/spec.md
+    text: Live composition still has a single refresh owner and a single shutdown
+      owner.
+    result: passed
+    reason:
+      text: LiveComposition still owns one model refresh path and AppDelegate still
+        shuts down the single locating provider.
+      truncated: false
+  - id: A10
+    source: specs/codex-executable-recovery/spec.md
+    text: The production Codex adapter locates the `codex` executable at a retryable
+      provider start, not once in `makeLiveComposition` with a substitute that
+      always throws.
+    result: passed
+    reason:
+      text: LocatingCodexUsageProvider.locate("codex") runs inside fetchUsage; factory
+        is not called until locate succeeds.
+      truncated: false
+  - id: A11
+    source: specs/codex-executable-recovery/spec.md
+    text: If locate fails, `fetchUsage()` fails with the existing
+      executable-unavailable typed error. No usage snapshot is published. Demo
+      data is never substituted.
+    result: passed
+    reason:
+      text: Locate failure throws
+        CodexUsageError.appServerFailure(.executableUnavailable); tests assert
+        no demo snapshot.
+      truncated: false
+  - id: A12
+    source: specs/codex-executable-recovery/spec.md
+    text: If a later refresh occurs after the executable becomes locatable, that
+      refresh creates or starts the real Codex provider and may publish a real
+      snapshot.
+    result: passed
+    reason:
+      text: After locator succeeds, inner CodexUsageProvider is created and fetchUsage
+        proceeds; composition object is unchanged.
+      truncated: false
+  - id: A13
+    source: specs/codex-executable-recovery/spec.md
+    text: The application composition object is not rebuilt to recover.
+    result: passed
+    reason:
+      text: Recovery does not call makeLiveComposition again; same LiveComposition
+        instance is retained.
+      truncated: false
+  - id: A14
+    source: specs/codex-executable-recovery/spec.md
+    text: Startup without Codex still starts with empty live snapshots and no demo
+      agents.
+    result: passed
+    reason:
+      text: "makeLiveComposition uses initialSnapshots: [] and initialAgents: []; live
+        tests assert no demo agents."
+      truncated: false
+  - id: A15
+    source: specs/codex-executable-recovery/spec.md
+    text: Termination still replies once when no Codex provider was created.
+    result: passed
+    reason:
+      text: testTerminationWithoutInstalledCodexStillRepliesOnce passed.
+      truncated: false
+  - id: A16
+    source: specs/codex-executable-recovery/spec.md
+    text: This capability does not add a provider registry or dependency-injection
+      container.
+    result: passed
+    reason:
+      text: Only LocatingCodexUsageProvider wrapping a factory closure; no registry or
+        DI container added.
+      truncated: false
+  - id: A17
+    source: specs/codex-executable-recovery/spec.md
+    text: It does not read or copy Codex credentials.
+    result: passed
+    reason:
+      text: Locator uses ExecutableLocator; no credential-file reads in the change.
+      truncated: false
+  - id: A18
+    source: specs/codex-executable-recovery/spec.md
+    text: It does not change Pulse layout or copy.
+    result: passed
+    reason:
+      text: git diff shows PulseView.swift and other v26 UI files unchanged.
+      truncated: false
+  - id: A19
+    source: specs/codex-executable-recovery/spec.md
+    text: "Locator reports missing, then present, without rebuilding composition:
+      the next refresh can succeed."
+    result: passed
+    reason:
+      text: testMissingCodexBecomesAvailableOnLaterRefreshWithoutRebuildingComposition
+        passed.
+      truncated: false
+  - id: A20
+    source: specs/codex-executable-recovery/spec.md
+    text: Startup without Codex never publishes demo usage.
+    result: passed
+    reason:
+      text: testMissingExecutableUsesUnavailableAdapterWithoutCreatingCodexProvider
+        and live startup tests assert no demo usage.
+      truncated: false
+  - id: A21
+    source: specs/codex-unused-notifications/spec.md
+    text: The production polling Codex path does not leave JSON-RPC notifications
+      unconsumed until the bounded buffer overflows and closes the client.
+    result: passed
+    reason:
+      text: CodexUsageProvider starts a drain after successful client.start(); unused
+        notifications are consumed.
+      truncated: false
+  - id: A22
+    source: specs/codex-unused-notifications/spec.md
+    text: The polling integration (`CodexUsageProvider` start / request / shutdown)
+      owns unused notifications for the client lifetime.
+    result: passed
+    reason:
+      text: notifications() drain is owned by CodexUsageProvider start/shutdown; join
+        happens after client.shutdown().
+      truncated: false
+  - id: A23
+    source: specs/codex-unused-notifications/spec.md
+    text: The default notification buffer size stays 100. Overflow remains a typed
+      failure when a real consumer falls behind.
+    result: passed
+    reason:
+      text: JSONRPCClient default maximumBufferedNotifications remains 100;
+        testNotificationBufferOverflowFailsTransportExplicitly still fails
+        closed.
+      truncated: false
+  - id: A24
+    source: specs/codex-unused-notifications/spec.md
+    text: A drain owner consumes the shared notification stream and drops each
+      event. Polling `request` calls keep completing after more than 100 valid
+      unused notifications.
+    result: passed
+    reason:
+      text: Drain for-try-await drops events; production fetch still completes after
+        >100 unused notifications.
+      truncated: false
+  - id: A25
+    source: specs/codex-unused-notifications/spec.md
+    text: Pulse still updates only from manual refresh and the periodic poll.
+      `account/rateLimits/updated` does not change the published snapshot by
+      itself.
+    result: passed
+    reason:
+      text: Drain discards events; fetch still uses account/read and
+        account/rateLimits/read only. No rateLimits/updated snapshot apply.
+      truncated: false
+  - id: A26
+    source: specs/codex-unused-notifications/spec.md
+    text: Shutdown of the usage client also ends notification ownership. No leftover
+      drain task outlives shutdown. The drain must not cancel the notification
+      stream in a way that closes in-flight requests before shutdown.
+    result: passed
+    reason:
+      text: shutdown joins drain after client.shutdown(); Task.detached avoids actor
+        deadlock; drain is not cancelled mid-request.
+      truncated: false
+  - id: A27
+    source: specs/codex-unused-notifications/spec.md
+    text: The Pulse UI does not gain a notification inbox, event bus, or new panel.
+    result: passed
+    reason:
+      text: No Pulse or notification UI files changed.
+      truncated: false
+  - id: A28
+    source: specs/codex-unused-notifications/spec.md
+    text: Do not raise `maximumBufferedNotifications` as the fix.
+    result: passed
+    reason:
+      text: Default buffer remains 100; CodexAppServerConfiguration default unchanged.
+      truncated: false
+  - id: A29
+    source: specs/codex-unused-notifications/spec.md
+    text: Do not add an application event bus.
+    result: passed
+    reason:
+      text: No event-bus type or module added.
+      truncated: false
+  - id: A30
+    source: specs/codex-unused-notifications/spec.md
+    text: Do not remove overflow protection for an active slow consumer.
+    result: passed
+    reason:
+      text: testNotificationBufferOverflowFailsTransportExplicitly still present and
+        passing.
+      truncated: false
+  - id: A31
+    source: specs/codex-unused-notifications/spec.md
+    text: More than 100 valid unused notifications during a provider+client lifetime
+      still allow later requests to complete.
+    result: passed
+    reason:
+      text: Provider drain test with 120 unused notifications then a later request
+        passed.
+      truncated: false
+  - id: A32
+    source: specs/codex-unused-notifications/spec.md
+    text: The existing overflow test for a subscribed consumer that falls behind
+      still fails closed.
+    result: passed
+    reason:
+      text: JSONRPCClientTests.testNotificationBufferOverflowFailsTransportExplicitly
+        passed.
+      truncated: false
+  - id: A33
+    source: specs/codex-unused-notifications/spec.md
+    text: Shutdown still completes.
+    result: passed
+    reason:
+      text: Drain join is part of shutdown; provider shutdown tests still pass.
+      truncated: false
+  - id: A34
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: "`JSONRPCClient` separates a malformed or invalid protocol line from clean
+      transport EOF last-line recovery."
+    result: passed
+    reason:
+      text: consume parse failures throw; readerEnded last-line recovery gated by
+        isCleanTransportEOF(transportClosed).
+      truncated: false
+  - id: A35
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: "When `consume` fails to decode or validate a complete line, the client:"
+    result: passed
+    reason:
+      text: On decode/validate failure, consume clears the buffer and throws; reader
+        loop calls readerEnded with that error.
+      truncated: false
+  - id: A36
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: discards remaining buffered bytes
+    result: passed
+    reason:
+      text: consume catch calls receiveBuffer.removeAll before rethrow.
+      truncated: false
+  - id: A37
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: fails every pending request with a typed protocol error
+    result: passed
+    reason:
+      text: readerEnded then close(with:) failAllPending with the typed JSONRPCError.
+      truncated: false
+  - id: A38
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: closes the connection
+    result: passed
+    reason:
+      text: close sets state closed and beginTransportShutdown runs.
+      truncated: false
+  - id: A39
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: does not decode further lines from that buffer or later chunks on the same
+      generation
+    result: passed
+    reason:
+      text: Throwing from consume exits the incomingBytes loop; later chunks of that
+        generation are not decoded.
+      truncated: false
+  - id: A40
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: Clean transport EOF may still decode one remaining buffer that has no
+      trailing newline, then close. That path is not used after a parse or
+      validation error.
+    result: passed
+    reason:
+      text: isCleanTransportEOF is true only for transportClosed; parse errors skip
+        last-line recovery.
+      truncated: false
+  - id: A41
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: A well-formed response that follows a malformed line in the same chunk, or
+      in a later chunk of the same generation, must not complete the pending
+      request.
+    result: passed
+    reason:
+      text: Same-chunk and later-chunk malformed-then-valid tests pass.
+      truncated: false
+  - id: A42
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: Existing oversized-line, fragmented-line, and clean-EOF last-line behavior
+      remains.
+    result: passed
+    reason:
+      text: Existing oversized, fragmented, and EOF last-line tests still passed in
+        swift test.
+      truncated: false
+  - id: A43
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: This capability does not introduce a new reader abstraction.
+    result: passed
+    reason:
+      text: Still a single reader Task over incomingBytes; no new reader type.
+      truncated: false
+  - id: A44
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: It does not treat stderr diagnostics as protocol data.
+    result: passed
+    reason:
+      text: testStandardErrorIsNeverParsedAsProtocolData passed; stderr remains
+        diagnostics.
+      truncated: false
+  - id: A45
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: 'Chunk `not json\n{"id":1,"result":"accepted"}\n` with request 1 pending:
+      the request fails; it does not return `accepted`.'
+    result: passed
+    reason:
+      text: testMalformedLineThenValidResponseInSameChunkFailsPendingRequest passed.
+      truncated: false
+  - id: A46
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: The same pair in separate chunks also fails the request.
+    result: passed
+    reason:
+      text: testMalformedLineThenValidResponseInLaterChunkFailsPendingRequest passed.
+      truncated: false
+  - id: A47
+    source: specs/jsonrpc-protocol-failure/spec.md
+    text: A valid last line without newline at clean EOF still completes.
+    result: passed
+    reason:
+      text: testValidFinalLineWithoutNewlineIsDecodedAtEndOfStream passed.
+      truncated: false
+  - id: A48
+    source: specs/process-stdio-eof/spec.md
+    text: "`ManagedProcess` treats stdout EOF and stderr EOF as stream lifecycle
+      events, independent of child-process termination."
+    result: passed
+    reason:
+      text: stdout and stderr EOF handlers unregister on empty availableData without
+        waiting for process exit.
+      truncated: false
+  - id: A49
+    source: specs/process-stdio-eof/spec.md
+    text: When a readability handler observes empty `availableData` for stdout or
+      stderr, it unregisters that handler immediately after scheduling the
+      existing EOF bookkeeping.
+    result: passed
+    reason:
+      text: Both handlers set readabilityHandler = nil immediately after scheduling
+        EOF bookkeeping.
+      truncated: false
+  - id: A50
+    source: specs/process-stdio-eof/spec.md
+    text: EOF on one stream does not unregister the other stream.
+    result: passed
+    reason:
+      text: stdout and stderr handlers are independent; tests close one stream while
+        the other remains.
+      truncated: false
+  - id: A51
+    source: specs/process-stdio-eof/spec.md
+    text: Last-byte delivery that arrived before EOF remains available to readers.
+    result: passed
+    reason:
+      text: Non-empty availableData is yielded before the empty-EOF path; existing
+        last-byte tests still pass.
+      truncated: false
+  - id: A52
+    source: specs/process-stdio-eof/spec.md
+    text: Process-exit observation, exit-status handling, forced termination, and
+      shutdown cleanup stay responsible for the child process. They still run if
+      the child remains alive after a pipe is closed.
+    result: passed
+    reason:
+      text: processDidTerminate, exit monitor, and shutdown cleanup are unchanged;
+        child sleep after exec 1>&- still gets shutdown.
+      truncated: false
+  - id: A53
+    source: specs/process-stdio-eof/spec.md
+    text: A handler that has unregistered at EOF must not be invoked again for that
+      stream on the same process instance.
+    result: passed
+    reason:
+      text: EOF tests assert a single EOF count per stream via readabilityProbe.
+      truncated: false
+  - id: A54
+    source: specs/process-stdio-eof/spec.md
+    text: This capability does not replace `ManagedProcess` with another process
+      subsystem.
+    result: passed
+    reason:
+      text: ManagedProcess remains the process owner; no replacement subsystem.
+      truncated: false
+  - id: A55
+    source: specs/process-stdio-eof/spec.md
+    text: It does not use CPU-time thresholds as the regression signal.
+    result: passed
+    reason:
+      text: Regression signal is probe call counts, not CPU time.
+      truncated: false
+  - id: A56
+    source: specs/process-stdio-eof/spec.md
+    text: "Close stdout while the child stays alive: stdout EOF is handled once,
+      then shutdown completes."
+    result: passed
+    reason:
+      text: testStdoutEOFUnregistersHandlerWhileChildStaysAlive passed.
+      truncated: false
+  - id: A57
+    source: specs/process-stdio-eof/spec.md
+    text: "Close stderr while the child stays alive: stderr EOF is handled once,
+      then shutdown completes."
+    result: passed
+    reason:
+      text: testStderrEOFUnregistersHandlerWhileChildStaysAlive passed.
+      truncated: false
+  - id: A58
+    source: specs/process-stdio-eof/spec.md
+    text: Count handler calls with bounded instrumentation.
+    result: passed
+    reason:
+      text: readabilityProbe records stdout/stderr call and EOF counts.
+      truncated: false
+  - id: A59
+    source: specs/release-test-gate/spec.md
+    text: A GitHub tagged release built from this repository cannot package or
+      publish until the tagged commit passes the same test and resilience
+      commands CI uses.
+    result: passed
+    reason:
+      text: release.yml Test and Run resilience checks steps precede package and gh
+        release create.
+      truncated: false
+  - id: A60
+    source: specs/release-test-gate/spec.md
+    text: "`.github/workflows/release.yml` remains triggered by tags matching
+      `v*.*.*`."
+    result: passed
+    reason:
+      text: on.push.tags remains ['v*.*.*'].
+      truncated: false
+  - id: A61
+    source: specs/release-test-gate/spec.md
+    text: "The `release` job, on the tagged commit, runs in this order:"
+    result: passed
+    reason:
+      text: Release job step order matches the specified sequence.
+      truncated: false
+  - id: A62
+    source: specs/release-test-gate/spec.md
+    text: checkout
+    result: passed
+    reason:
+      text: First step is actions/checkout@v4.
+      truncated: false
+  - id: A63
+    source: specs/release-test-gate/spec.md
+    text: "`swift test`"
+    result: passed
+    reason:
+      text: Second step runs swift test.
+      truncated: false
+  - id: A64
+    source: specs/release-test-gate/spec.md
+    text: "`./Scripts/verify-resilience.sh`"
+    result: passed
+    reason:
+      text: Third step runs ./Scripts/verify-resilience.sh.
+      truncated: false
+  - id: A65
+    source: specs/release-test-gate/spec.md
+    text: existing universal package build (`Scripts/package-app.sh`)
+    result: passed
+    reason:
+      text: Then Scripts/package-app.sh with USAGE_ISLAND_ARCHS.
+      truncated: false
+  - id: A66
+    source: specs/release-test-gate/spec.md
+    text: zip and checksum
+    result: passed
+    reason:
+      text: Then ditto zip and shasum checksum.
+      truncated: false
+  - id: A67
+    source: specs/release-test-gate/spec.md
+    text: "`gh release create`"
+    result: passed
+    reason:
+      text: Last step is gh release create.
+      truncated: false
+  - id: A68
+    source: specs/release-test-gate/spec.md
+    text: If `swift test` or `./Scripts/verify-resilience.sh` fails, later package
+      and publish steps do not run.
+    result: passed
+    reason:
+      text: "No continue-on-error or if: always(); default GitHub Actions skips later
+        steps after a failure."
+      truncated: false
+  - id: A69
+    source: specs/release-test-gate/spec.md
+    text: Commands stay in this job. The workflow does not query another workflow's
+      check status to decide whether to publish.
+    result: passed
+    reason:
+      text: No workflow_run or needs of another workflow; commands are inline in this
+        job.
+      truncated: false
+  - id: A70
+    source: specs/release-test-gate/spec.md
+    text: This capability does not publish a known-broken release to prove the gate.
+    result: passed
+    reason:
+      text: Proof is YAML order plus ReleaseWorkflowTests, not a published broken
+        release.
+      truncated: false
+  - id: A71
+    source: specs/release-test-gate/spec.md
+    text: It does not require a reusable workflow until duplicated commands become a
+      real maintenance problem.
+    result: passed
+    reason:
+      text: Steps remain in this job; no reusable workflow added.
+      truncated: false
+  - id: A72
+    source: specs/release-test-gate/spec.md
+    text: Release YAML lists test and resilience steps before package and publish.
+    result: passed
+    reason:
+      text: testIndex < resilienceIndex < packageIndex < publishIndex in
+        ReleaseWorkflowTests.
+      truncated: false
+  - id: A73
+    source: specs/release-test-gate/spec.md
+    text: A verification method that does not create a GitHub release shows that a
+      failing test step prevents the publish step from running.
+    result: passed
+    reason:
+      text: ReleaseWorkflowTests inspects YAML for step order and absence of
+        continue-on-error without creating a GitHub release.
+      truncated: false
+builder_handoff:
+  candidate_id: 637126fd-b77c-4945-910b-e600040dc5ee
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:721850df-35e9-4534-8670-501763ea9c2e
+  iteration: 1
+  summary:
+    text: "Implemented F1-F4 and discard-drain R1: unregister stdio EOF handlers,
+      retry Codex locate on refresh, fail-closed malformed JSON-RPC lines, drain
+      unused notifications, and gate tagged releases with swift test plus
+      resilience before package/publish. 228 tests passed; debug build and
+      verify-resilience.sh passed. v26 UI files unchanged."
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+    - A20
+    - A21
+    - A22
+    - A23
+    - A24
+    - A25
+    - A26
+    - A27
+    - A28
+    - A29
+    - A30
+    - A31
+    - A32
+    - A33
+    - A34
+    - A35
+    - A36
+    - A37
+    - A38
+    - A39
+    - A40
+    - A41
+    - A42
+    - A43
+    - A44
+    - A45
+    - A46
+    - A47
+    - A48
+    - A49
+    - A50
+    - A51
+    - A52
+    - A53
+    - A54
+    - A55
+    - A56
+    - A57
+    - A58
+    - A59
+    - A60
+    - A61
+    - A62
+    - A63
+    - A64
+    - A65
+    - A66
+    - A67
+    - A68
+    - A69
+    - A70
+    - A71
+    - A72
+    - A73
+  checks:
+    - name:
+        text: swift test
+        truncated: false
+      result: passed
+      note:
+        text: 228 tests, 0 failures
+        truncated: false
+    - name:
+        text: swift build --product UsageIslandPrototype
+        truncated: false
+      result: passed
+      note:
+        text: debug executable linked
+        truncated: false
+    - name:
+        text: ./Scripts/verify-resilience.sh
+        truncated: false
+      result: passed
+      note:
+        text: includes 768 geometry cases and 30 adaptive-notch cases
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: No real Codex authentication, credential access, or live quota calls.
+      truncated: false
+    - text: No interactive pixel, lid-closed, sleep/wake, fullscreen, or Spaces
+        verification.
+      truncated: false
+    - text: Release fail-fast is proven by YAML step order and GitHub Actions default
+        (no continue-on-error), not by publishing a broken GitHub release.
+      truncated: false
+  known_limits_truncated: false
+  submitted_at: 2026-09-06T23:57:50.945Z
+blockers: []
+verification:
+  candidate_id: 637126fd-b77c-4945-910b-e600040dc5ee
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:ceb046e8-54e6-4724-9c0d-a87f4408dcbc
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: swift-test
+      name:
+        text: swift test
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 4962
+    - id: swift-build
+      name:
+        text: swift build --product UsageIslandPrototype
+        truncated: false
+      argv_display:
+        - text: build
+          truncated: false
+        - text: --product
+          truncated: false
+        - text: UsageIslandPrototype
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 639
+    - id: verify-resilience
+      name:
+        text: ./Scripts/verify-resilience.sh
+        truncated: false
+      argv_display: []
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 3005
+  summary:
+    text: Independent Verify passed. Runtime re-ran swift test, swift build
+      --product UsageIslandPrototype, and ./Scripts/verify-resilience.sh (all
+      exit 0). Spec review of F1-F4 and discard-drain R1 matches the 73
+      acceptance items. v26 UI files unchanged.
+    truncated: false
+  risks:
+    - text: No real Codex authentication, credential access, or live quota calls.
+      truncated: false
+    - text: No interactive pixel, lid-closed, sleep/wake, fullscreen, or Spaces
+        verification.
+      truncated: false
+    - text: Release fail-fast is proven by YAML step order and GitHub Actions default
+        (no continue-on-error), not by publishing a broken GitHub release.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-07T00:07:18.611Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: Independent Verify passed. Runtime re-ran swift test, swift build
+        --product UsageIslandPrototype, and ./Scripts/verify-resilience.sh (all
+        exit 0). Spec review of F1-F4 and discard-drain R1 matches the 73
+        acceptance items. v26 UI files unchanged.
+      truncated: false
+    completed_at: 2026-09-07T00:07:18.611Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: false
+created_at: 2026-09-06T22:36:14.050Z

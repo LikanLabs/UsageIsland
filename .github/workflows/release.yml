@@ -12,6 +12,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Run resilience checks
+        run: ./Scripts/verify-resilience.sh
       - name: Build universal app
         env:
           USAGE_ISLAND_ARCHS: arm64,x86_64

@@ -31,20 +31,20 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertNil(harness.composition.model.attentionAgent)
     }
 
-    func testLiveCompositionCreatesAndRetainsExactlyOneCodexProvider() {
-        var factoryCalls = 0
-        var createdProvider: CodexUsageProvider?
+    func testLiveCompositionCreatesAndRetainsExactlyOneCodexProvider() async throws {
+        let probe = LiveProviderFactoryProbe()
 
         let harness = makeLiveHarness { client, clock in
-            factoryCalls += 1
-            let provider = CodexUsageProvider(client: client, clock: clock)
-            createdProvider = provider
-            return provider
+            probe.make(client: client, clock: clock)
         }
 
-        XCTAssertEqual(factoryCalls, 1)
-        XCTAssertNotNil(harness.composition.codexUsageProvider)
-        XCTAssertTrue(harness.composition.codexUsageProvider === createdProvider)
+        XCTAssertEqual(probe.calls, 0)
+        await harness.composition.model.refreshUsage()
+        XCTAssertEqual(probe.calls, 1)
+        await harness.composition.model.refreshUsage()
+        XCTAssertEqual(probe.calls, 1)
+        XCTAssertNotNil(probe.created)
+        XCTAssertEqual(harness.composition.model.connectionStates[.codex], .connected)
     }
 
     func testInitialRefreshPublishesOnlyCodex() async {
@@ -126,7 +126,7 @@ final class LiveCompositionTests: XCTestCase {
     }
 
     func testMissingExecutableUsesUnavailableAdapterWithoutCreatingCodexProvider() async {
-        var factoryCalls = 0
+        let probe = LiveProviderFactoryProbe()
         let locator = ExecutableLocator(
             environmentPath: nil,
             commonSearchPaths: [],
@@ -137,15 +137,14 @@ final class LiveCompositionTests: XCTestCase {
             clock: FixedLiveClock(now),
             locator: locator
         ) { _, clock in
-            factoryCalls += 1
-            return CodexUsageProvider(client: client, clock: clock)
+            probe.make(client: client, clock: clock)
         }
 
-        XCTAssertNil(composition.codexUsageProvider)
-        XCTAssertEqual(factoryCalls, 0)
+        XCTAssertEqual(probe.calls, 0)
 
         await composition.model.refreshUsage()
 
+        XCTAssertEqual(probe.calls, 0)
         XCTAssertEqual(composition.model.providers.map(\.id), [])
         XCTAssertEqual(composition.model.connectionStates[.codex], .failed)
         XCTAssertEqual(composition.model.freshness(for: .codex), .unavailable)
@@ -239,6 +238,7 @@ final class LiveCompositionTests: XCTestCase {
             terminationReply: { replies.record($0) }
         )
 
+        await harness.composition.model.refreshUsage()
         XCTAssertEqual(delegate.requestTermination(), .terminateLater)
         XCTAssertEqual(delegate.requestTermination(), .terminateLater)
         await shutdownGate.waitUntilEntered()
@@ -301,6 +301,7 @@ final class LiveCompositionTests: XCTestCase {
             terminationReply: { replies.record($0) }
         )
 
+        await harness.composition.model.refreshUsage()
         XCTAssertEqual(delegate.requestTermination(), .terminateLater)
         await delegate.waitForTermination()
 
@@ -335,6 +336,41 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(replies.values, [true])
     }
 
+    func testMissingCodexBecomesAvailableOnLaterRefreshWithoutRebuildingComposition() async {
+        let availability = ExecutableAvailability(false)
+        let probe = LiveProviderFactoryProbe()
+        let locator = ExecutableLocator(
+            environmentPath: nil,
+            additionalSearchPaths: [
+                URL(fileURLWithPath: "/synthetic/bin", isDirectory: true)
+            ],
+            commonSearchPaths: [],
+            isExecutable: { availability.isAvailable && $0.lastPathComponent == "codex" }
+        )
+        let client = LiveFakeCodexClient()
+        let composition = AppDelegate.makeLiveComposition(
+            clock: FixedLiveClock(now),
+            locator: locator
+        ) { _, clock in
+            probe.make(client: client, clock: clock)
+        }
+        let model = composition.model
+
+        await model.refreshUsage()
+        XCTAssertEqual(probe.calls, 0)
+        XCTAssertEqual(model.providers.map(\.id), [])
+        XCTAssertEqual(model.connectionStates[.codex], .failed)
+        XCTAssertEqual(model.freshness(for: .codex), .unavailable)
+
+        availability.isAvailable = true
+        await model.refreshUsage()
+        await model.refreshUsage()
+
+        XCTAssertEqual(probe.calls, 1)
+        XCTAssertEqual(model.providers.map(\.id), [.codex])
+        XCTAssertEqual(model.connectionStates[.codex], .connected)
+    }
+
     private func makeLiveHarness(
         accountGate: LiveTestGate? = nil,
         shutdownGate: LiveTestGate? = nil,
@@ -342,7 +378,7 @@ final class LiveCompositionTests: XCTestCase {
         shutdownError: (any Error & Sendable)? = nil,
         rateLimitFailures: Set<Int> = [],
         rateLimitsResponse: JSONValue? = nil,
-        providerFactory: ((LiveFakeCodexClient, any UsageClock) -> CodexUsageProvider)? = nil
+        providerFactory: (@Sendable (LiveFakeCodexClient, any UsageClock) -> CodexUsageProvider)? = nil
     ) -> LiveHarness {
         let client = LiveFakeCodexClient(
             accountGate: accountGate,
@@ -372,6 +408,43 @@ final class LiveCompositionTests: XCTestCase {
 private struct LiveHarness {
     let composition: LiveComposition
     let client: LiveFakeCodexClient
+}
+
+private final class LiveProviderFactoryProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var callCount = 0
+    private var createdProvider: CodexUsageProvider?
+
+    var calls: Int {
+        lock.withLock { callCount }
+    }
+
+    var created: CodexUsageProvider? {
+        lock.withLock { createdProvider }
+    }
+
+    func make(client: LiveFakeCodexClient, clock: any UsageClock) -> CodexUsageProvider {
+        let provider = CodexUsageProvider(client: client, clock: clock)
+        lock.withLock {
+            callCount += 1
+            createdProvider = provider
+        }
+        return provider
+    }
+}
+
+private final class ExecutableAvailability: @unchecked Sendable {
+    private let lock = NSLock()
+    private var available: Bool
+
+    var isAvailable: Bool {
+        get { lock.withLock { available } }
+        set { lock.withLock { available = newValue } }
+    }
+
+    init(_ available: Bool) {
+        self.available = available
+    }
 }
 
 private struct FixedLiveClock: UsageClock {
@@ -428,6 +501,10 @@ private actor LiveFakeCodexClient: CodexUsageClient {
         if let startError {
             throw startError
         }
+    }
+
+    func notifications() -> AsyncThrowingStream<JSONRPCNotification, Error> {
+        AsyncThrowingStream { $0.finish() }
     }
 
     func request(method: String, params: JSONValue?) async throws -> JSONValue {
