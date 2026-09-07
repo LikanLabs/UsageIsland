@@ -48,34 +48,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
-    static func makeDemoModel(clock: any UsageClock) -> AppModel {
-        makeModel(
-            providerAdapters: DemoUsageProvider.providerAdapters(for: .normal, clock: clock),
-            clock: clock,
-            initialSnapshots: DemoUsageProvider.snapshots(for: .normal, clock: clock)
-        )
-    }
-
     static func makeModel(
         providerAdapters: [any UsageProvider],
         clock: any UsageClock,
         initialSnapshots: [UsageSnapshot],
-        initialAgents: [AgentSession]? = nil,
-        initialScenario: DemoScenario = .normal
+        initialAgents: [AgentSession] = []
     ) -> AppModel {
         do {
             return try AppModel(
                 providerAdapters: providerAdapters,
                 clock: clock,
                 initialSnapshots: initialSnapshots,
-                initialAgents: initialAgents,
-                initialScenario: initialScenario
+                initialAgents: initialAgents
             )
         } catch {
             return AppModel.empty(
                 clock: clock,
-                initialAgents: initialAgents,
-                initialScenario: initialScenario
+                initialAgents: initialAgents
             )
         }
     }

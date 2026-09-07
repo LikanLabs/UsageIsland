@@ -258,10 +258,6 @@ public struct PulseView: View {
   }
 
   private func sourceName(for provider: ProviderID) -> String {
-    switch provider {
-    case .claude: "Claude OAuth"
-    case .codex: "Codex app-server"
-    case .openCodeGo: "OpenCode Web · Experimental"
-    }
+    "Codex app-server"
   }
 }
