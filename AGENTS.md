@@ -10,8 +10,7 @@ pill with the Codex mark inside a usage ring, and a details panel that holds
 both usage and settings. The user explicitly approved it on 2026-09-05 as the
 replacement for the earlier v26 prototype, which was removed on 2026-09-26.
 
-The current implementation phase is to replace demo data with real provider
-data without redesigning the interface.
+The product supports Codex only. Changes must keep the interface as approved.
 
 ## Non-negotiable visual baseline
 
@@ -58,7 +57,7 @@ Backend work must adapt to the existing frontend, not the opposite.
 New backend code must be separated into these responsibilities:
 
 - Domain: provider-independent models and errors.
-- Providers: Claude, Codex, and OpenCode adapters.
+- Providers: Codex adapters.
 - Infrastructure: processes, JSON-RPC, caching, clocks and filesystem access.
 - Store: observable application state consumed by the existing UI.
 - AgentMonitoring: agent discovery and normalized activity.
@@ -66,17 +65,10 @@ New backend code must be separated into these responsibilities:
 The UI must consume normalized domain snapshots. It must never parse provider
 responses, launch subprocesses, read credentials or calculate provider rules.
 
-## Provider order
+## Provider scope
 
-Implement providers in this order:
-
-1. Demo provider through the new architecture.
-2. Codex using `codex app-server`.
-3. Claude Code.
-4. OpenCode Go as experimental.
-5. Agent monitoring and orchestrator integrations.
-
-Do not implement more than one new provider in a single change.
+Usage Island supports Codex through `codex app-server`. Other usage providers
+and synthetic demo providers are outside the product scope.
 
 ## Data rules
 

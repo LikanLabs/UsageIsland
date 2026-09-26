@@ -3,6 +3,10 @@ import XCTest
 @testable import UsageIslandPrototype
 
 final class UsageIslandPrototypeTests: XCTestCase {
+  func testProviderCatalogContainsOnlyCodex() {
+    XCTAssertEqual(ProviderID.allCases, [.codex])
+  }
+
   func testPriorityMakesCriticalProviderFirst() throws {
     let now = Date.now
     let normal = try ProviderUsage(
@@ -19,7 +23,7 @@ final class UsageIslandPrototypeTests: XCTestCase {
       capturedAt: now
     )
     let critical = try ProviderUsage(
-      id: .claude,
+      id: .codex,
       preferredWindow: .init(
         durationMinutes: 300,
         remainingPercent: 8,

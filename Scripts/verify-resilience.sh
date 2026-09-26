@@ -8,8 +8,10 @@ build_system=()
 if swift build --help 2>/dev/null | grep -q 'default: swiftbuild'; then
     build_system=(--build-system native)
 fi
-swift build ${build_system[@]+"${build_system[@]}"} --product UsageIslandPrototype
-binary_dir="$(swift build ${build_system[@]+"${build_system[@]}"} --show-bin-path)"
+scratch_dir="$(mktemp -d)"
+trap 'rm -rf "$scratch_dir"' EXIT
+swift build ${build_system[@]+"${build_system[@]}"} --scratch-path "$scratch_dir" --product UsageIslandPrototype
+binary_dir="$(swift build ${build_system[@]+"${build_system[@]}"} --scratch-path "$scratch_dir" --show-bin-path)"
 objects=()
 for object in "$binary_dir"/UsageIslandPrototype.build/*.swift.o; do
     if [[ "$object" != */UsageIslandApp.swift.o ]]; then objects+=("$object"); fi

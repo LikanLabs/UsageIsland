@@ -42,13 +42,6 @@ public enum WingPresentationMode: String, CaseIterable, Sendable {
     case hidden
 }
 
-public enum DemoScenario: String, CaseIterable, Sendable {
-    case normal
-    case critical
-    case waiting
-    case error
-}
-
 public enum BeaconPolicy: String, CaseIterable, Sendable {
     case automatic
     case always
