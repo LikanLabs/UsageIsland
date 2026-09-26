@@ -39,12 +39,24 @@ else
 fi
 cp Assets/OpenAI/LICENSE.md "$app_path/Contents/Resources/OpenAI-SimpleIcons-LICENSE.md"
 cp Assets/Claude/LICENSE.md "$app_path/Contents/Resources/Claude-SimpleIcons-LICENSE.md"
+# App icon: every size macOS uses, generated from the 1024 px master
+# (re-render the master with Scripts/render-app-icon.swift).
+iconset="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" Assets/AppIcon/AppIcon-1024.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+    double=$((size * 2))
+    sips -z "$double" "$double" Assets/AppIcon/AppIcon-1024.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app_path/Contents/Resources/AppIcon.icns"
+rm -rf "$(dirname "$iconset")"
 cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>UsageIslandPrototype</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>com.likanlabs.usageisland</string>
     <key>CFBundleName</key><string>Usage Island</string>
     <key>CFBundleDisplayName</key><string>Usage Island</string>
