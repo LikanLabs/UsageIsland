@@ -136,12 +136,21 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     }
 
     func dataSent(at index: Int, maximumYields: Int = 10_000) async throws -> Data {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if sentData.indices.contains(index) {
                 return sentData[index]
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Message \(index) was not sent"
@@ -149,12 +158,21 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     }
 
     func waitUntilStartCalled(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if startCalls > 0 {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Transport start was not called"
@@ -162,12 +180,21 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     }
 
     func waitUntilSendCalled(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if sendCalls > 0 {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Transport send was not called"
@@ -177,12 +204,21 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     func waitUntilIncomingBytesCalled(
         maximumYields: Int = 10_000
     ) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if incomingCalls > 0 {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Transport incomingBytes was not called"
@@ -190,12 +226,21 @@ actor FakeJSONRPCTransport: JSONRPCTransport {
     }
 
     func waitUntilShutdownCalled(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if shutdownCalls > 0 {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Transport shutdown was not called"
@@ -427,12 +472,21 @@ actor RecordingCodexTransportFactory: CodexProcessTransportFactory {
     }
 
     func waitUntilCreationCalled(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if creationCalls > 0 {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Transport factory was not called"
@@ -548,12 +602,21 @@ actor TrackedTaskState {
     }
 
     func waitUntilCompleted(maximumYields: Int = 100_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if completed {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Tracked task did not complete"
@@ -561,12 +624,21 @@ actor TrackedTaskState {
     }
 
     func waitUntilBegan(maximumYields: Int = 10_000) async throws {
-        for _ in 0..<maximumYields {
+        var yields = 0
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        // Yield first for speed; on a slow machine keep polling until the
+        // wall-clock deadline instead of failing after a fixed yield count.
+        while yields < maximumYields || ContinuousClock.now < deadline {
             try Task.checkCancellation()
             if began {
                 return
             }
-            await Task.yield()
+            yields += 1
+            if yields < maximumYields {
+                await Task.yield()
+            } else {
+                try await Task.sleep(for: .milliseconds(1))
+            }
         }
         throw TransportTestProbeError.conditionNotReached(
             "Tracked task did not begin"
