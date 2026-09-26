@@ -31,15 +31,16 @@ struct Icon: View {
                     VStack(spacing: 22) {
                         ZStack {
                             Circle().stroke(.white.opacity(0.16), lineWidth: 40)
-                            Circle().trim(from: 0, to: 0.71)
-                                .stroke(AngularGradient(colors: [teal, mint], center: .center, startAngle: .degrees(0), endAngle: .degrees(256)),
+                            // A full ring: all of the quota still available.
+                            Circle()
+                                .stroke(AngularGradient(colors: [teal, mint, teal], center: .center),
                                         style: StrokeStyle(lineWidth: 40, lineCap: .round))
                                 .rotationEffect(.degrees(-90))
                             Circle().fill(.white.opacity(0.95)).frame(width: 46)
                         }
                         .frame(width: 244, height: 244)
-                        Text("71%")
-                            .font(.system(size: 118, weight: .bold, design: .rounded))
+                        Text("100%")
+                            .font(.system(size: 104, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                     }
                     .offset(x: 14, y: 6)
