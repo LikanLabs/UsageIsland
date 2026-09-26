@@ -6,8 +6,12 @@
   and printed `5h 13% · 7d 40%`; about 10 ms per run once warm (240 ms cold).
 - Rendered pill, usage panel with both providers and settings with synthetic
   data at 2x; the Claude row and sections fit the panel.
-- Not verified yet: a live Claude Code session feeding the installed app, and
-  automatic switching during real use.
+- The Claude desktop app does not run status line commands: with the bridge
+  installed, no record was written during desktop sessions. Added the CLI
+  `get_usage` query, which covers every surface: against the real account it
+  returned 28 % session and 5 % week in about 2 s, used no tokens, printed
+  nothing to stderr and created no session files.
+- Not verified yet: automatic switching during real use.
 
 # Validation — 2026-09-26 (review fixes)
 

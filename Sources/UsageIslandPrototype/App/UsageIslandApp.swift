@@ -95,14 +95,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             any UsageClock
         ) -> CodexUsageProvider = { configuration, clock in
             CodexUsageProvider(configuration: configuration, clock: clock)
-        }
+        },
+        makeClaudeQuery: (@Sendable () -> (any ClaudeUsageQuerying)?)? = nil
     ) -> LiveComposition {
         let provider = LocatingCodexUsageProvider(
             locator: locator,
             clock: clock,
             makeCodexProvider: makeCodexProvider
         )
-        let claude = ClaudeUsageProvider(recordURL: claudeRecordURL, clock: clock)
+        let claude = ClaudeUsageProvider(
+            recordURL: claudeRecordURL,
+            clock: clock,
+            makeQuery: makeClaudeQuery ?? ClaudeUsageProvider.cliQuery(locator: locator)
+        )
         let model = makeModel(
             providerAdapters: [provider, claude],
             clock: clock,

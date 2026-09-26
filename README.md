@@ -70,23 +70,27 @@ value.
 
 ## Claude Code
 
-Usage Island can also show your Claude subscription limits (5-hour session and
-weekly), the same numbers Claude Code shows in `/usage`.
+Usage Island also shows your Claude subscription limits (5-hour session and
+weekly), the same numbers Claude Code shows in `/usage`. It needs the Claude
+Code CLI installed and signed in; nothing else.
 
-1. Open the panel, then the gear.
-2. Next to **Claude Code**, click **Connect**.
+Every two minutes (and when you open the panel) the app asks the installed
+CLI for its structured `/usage` data, using the CLI's own sign-in. The query
+runs isolated (`--restricted`, no MCP servers, no tools, no saved session),
+sends no prompt and uses no tokens. These numbers come from your account, so
+they include Claude Code in the terminal and the desktop app as well as
+claude.ai.
 
-This adds a status line to `~/.claude/settings.json` that runs Usage Island in
-a small bridge mode. After each Claude reply it saves only the limit
-percentages and reset times to
+**Optional: instant updates in the terminal.** In the panel's settings, click
+**Connect** next to **Claude in terminal**. This adds a status line to
+`~/.claude/settings.json` that runs Usage Island in a small bridge mode: after
+each reply it saves only the limit percentages and reset times to
 `~/Library/Application Support/Usage Island/claude-rate-limits.json` and shows
-`5h 32% · 7d 58%` in Claude Code. Usage Island never reads your Claude
-credentials. If you already have your own status line, it is left untouched.
-**Disconnect** removes the bridge and the saved reading.
+`5h 32% · 7d 58%` in Claude Code. If you already have your own status line, it
+is left untouched. **Disconnect** removes the bridge and the saved reading.
 
-Claude usage updates while you use Claude Code; readings older than 15 minutes
-are marked as last known. The pill shows whichever tool you used most
-recently, and the panel shows both.
+Usage Island never reads your Claude credentials. The pill shows whichever
+tool you used most recently, and the panel shows both.
 
 ## Build locally
 

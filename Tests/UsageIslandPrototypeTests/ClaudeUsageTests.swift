@@ -334,3 +334,154 @@ private func assertThrows<E: Error & Equatable>(
         XCTAssertEqual(error as? E, expected, file: file, line: line)
     }
 }
+
+/// Synthetic `get_usage` stream-json output, mirroring the CLI's shape.
+private func usageOutput(five: Double, week: Double, requestID: String = "usage-island") -> Data {
+    Data("""
+    {"type":"system","subtype":"init"}
+    {"type":"control_response","response":{"subtype":"success","request_id":"\(requestID)","response":{"session":{"total_cost_usd":0},"subscription_type":"max","rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":\(five),"resets_at":"2023-11-14T23:13:20.141375+00:00"},"seven_day":{"utilization":\(week),"resets_at":"2023-11-20T11:46:40+00:00"},"seven_day_opus":null,"limits":[]},"behaviors":null}}}
+
+    """.utf8)
+}
+
+final class ClaudeUsageResponseParserTests: XCTestCase {
+    func testParsesPlanLimitsFromControlResponse() throws {
+        let limits = try ClaudeUsageResponseParser.limits(from: usageOutput(five: 27, week: 4.5))
+        XCTAssertEqual(limits.fiveHour?.usedPercentage, 27)
+        XCTAssertEqual(limits.fiveHour?.resetsAt.timeIntervalSince1970 ?? 0, 1_700_003_600.141, accuracy: 0.01)
+        XCTAssertEqual(limits.sevenDay?.usedPercentage, 4.5)
+        XCTAssertEqual(limits.sevenDay?.resetsAt, Date(timeIntervalSince1970: 1_700_480_800))
+    }
+
+    func testRejectsMissingForeignAndUnavailableResponses() {
+        XCTAssertThrowsError(try ClaudeUsageResponseParser.limits(from: Data())) {
+            XCTAssertEqual($0 as? ClaudeUsageResponseParser.Failure, .noResponse)
+        }
+        XCTAssertThrowsError(try ClaudeUsageResponseParser.limits(from: usageOutput(five: 1, week: 1, requestID: "other"))) {
+            XCTAssertEqual($0 as? ClaudeUsageResponseParser.Failure, .noResponse)
+        }
+        let apiKey = Data(#"{"type":"control_response","response":{"subtype":"success","request_id":"usage-island","response":{"rate_limits_available":false,"rate_limits":null}}}"#.utf8)
+        XCTAssertThrowsError(try ClaudeUsageResponseParser.limits(from: apiKey)) {
+            XCTAssertEqual($0 as? ClaudeUsageResponseParser.Failure, .limitsUnavailable)
+        }
+        let failed = Data(#"{"type":"control_response","response":{"subtype":"error","request_id":"usage-island","error":"x"}}"#.utf8)
+        XCTAssertThrowsError(try ClaudeUsageResponseParser.limits(from: failed)) {
+            XCTAssertEqual($0 as? ClaudeUsageResponseParser.Failure, .requestFailed)
+        }
+    }
+
+    func testCommandIsolatesTheCLIFromTheUsersSetup() {
+        let arguments = ClaudeUsageCommand.arguments
+        for flag in ["-p", "--restricted", "--strict-mcp-config", "--no-session-persistence"] {
+            XCTAssertTrue(arguments.contains(flag), flag)
+        }
+        XCTAssertEqual(arguments[arguments.firstIndex(of: "--tools")! + 1], "")
+    }
+}
+
+final class ClaudeCombinedSourceTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func testCLIAnswerCoversUsageWithoutTheBridge() async throws {
+        let directory = try temporaryDirectory()
+        let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
+        let provider = ClaudeUsageProvider(
+            recordURL: directory.appendingPathComponent("none.json"),
+            clock: FixedClaudeClock(now),
+            makeQuery: { query }
+        )
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [27, 4])
+        XCTAssertEqual(snapshot.freshness, .fresh)
+        XCTAssertNil(snapshot.lastActivityAt)
+        let calls = await query.calls
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testCLIIsQueriedAtMostOncePerInterval() async throws {
+        let clock = SteppingClaudeClock(now)
+        let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
+        let provider = ClaudeUsageProvider(
+            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
+            clock: clock, queryInterval: 120, makeQuery: { query }
+        )
+        _ = try await provider.fetchUsage()
+        clock.advance(60)
+        _ = try await provider.fetchUsage()
+        var calls = await query.calls
+        XCTAssertEqual(calls, 1)
+        clock.advance(61)
+        _ = try await provider.fetchUsage()
+        calls = await query.calls
+        XCTAssertEqual(calls, 2)
+    }
+
+    func testNewestSourceWinsAndBridgeTimeIsActivity() async throws {
+        let clock = SteppingClaudeClock(now)
+        let url = try temporaryDirectory().appendingPathComponent("record.json")
+        let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
+        let provider = ClaudeUsageProvider(recordURL: url, clock: clock, queryInterval: 120, makeQuery: { query })
+
+        _ = try await provider.fetchUsage()  // CLI answer at `now`
+        clock.advance(30)
+        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: clock.now())
+        var snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [32, 58], "newer bridge record wins")
+        XCTAssertEqual(snapshot.lastActivityAt, clock.now())
+
+        clock.advance(120)
+        await query.set(usageOutput(five: 40, week: 60))
+        snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [40, 60], "newer CLI answer wins")
+        XCTAssertEqual(snapshot.lastActivityAt, now.addingTimeInterval(30), "activity still comes from the bridge")
+    }
+
+    func testFailingCLIFallsBackToBridgeOrFails() async throws {
+        let url = try temporaryDirectory().appendingPathComponent("record.json")
+        let query = ScriptedUsageQuery(output: Data("garbage".utf8))
+        let provider = ClaudeUsageProvider(recordURL: url, clock: FixedClaudeClock(now), makeQuery: { query })
+        await assertThrows(ClaudeUsageError.notConnected) { _ = try await provider.fetchUsage() }
+
+        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [32, 58])
+    }
+}
+
+@MainActor
+final class ClaudeDesktopActivityTests: XCTestCase {
+    func testRisingClaudeUsageFromTheCLISwitchesThePill() async throws {
+        let launch = Date(timeIntervalSince1970: 1_700_000_000)
+        let clock = SteppingClaudeClock(launch)
+        let query = ScriptedUsageQuery(output: usageOutput(five: 10, week: 5))
+        let claude = ClaudeUsageProvider(
+            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
+            clock: clock, queryInterval: 0, makeQuery: { query }
+        )
+        let codex = ScriptedUsageProvider(id: .codex)
+        await codex.set(try UsageSnapshot(
+            provider: .codex,
+            preferredWindow: UsageWindow(durationMinutes: 300, usedPercent: 50, resetsAt: nil),
+            additionalWindows: [], weeklySpend: nil, freshness: .fresh, isActivelyUsed: false, capturedAt: launch
+        ))
+        let model = try AppModel(providerAdapters: [codex, claude], clock: clock, initialSnapshots: [])
+        await model.refreshUsage()
+        XCTAssertEqual(model.displayedProviderID, .codex)
+
+        clock.advance(120)
+        await query.set(usageOutput(five: 12, week: 5))
+        await model.refreshUsage()
+        XCTAssertEqual(model.displayedProviderID, .claude, "Claude desktop use shows up as rising CLI usage")
+    }
+}
+
+private actor ScriptedUsageQuery: ClaudeUsageQuerying {
+    private var output: Data
+    private(set) var calls = 0
+    init(output: Data) { self.output = output }
+    func set(_ output: Data) { self.output = output }
+    func queryUsage() async throws -> Data {
+        calls += 1
+        return output
+    }
+}

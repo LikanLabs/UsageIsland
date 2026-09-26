@@ -62,11 +62,14 @@ struct AppearanceSettingsView: View {
         }.tint(.white)
     }
 
-    /// Connects Claude Code by installing the status line bridge.
+    /// Optional: the status line bridge updates Claude instantly after each
+    /// terminal reply. Claude usage works without it.
     private var claudeRow: some View {
         HStack(spacing: 6) {
             ProviderMark(provider: .claude, color: .white.opacity(0.7)).frame(width: 12, height: 12)
-            label("Claude Code")
+            label(preferences.text("Claude in terminal", "Claude en terminal"))
+                .help(preferences.text("Optional. Updates Claude usage right after each reply in Claude Code in the terminal.",
+                                       "Opcional. Actualiza el consumo de Claude justo después de cada respuesta en Claude Code en la terminal."))
             Spacer()
             switch claude.status {
             case .notInstalled:

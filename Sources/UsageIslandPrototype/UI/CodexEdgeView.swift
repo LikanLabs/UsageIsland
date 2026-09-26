@@ -241,7 +241,7 @@ struct CodexPanelContent: View {
                         .frame(height: CodexEdgeLayout.detailHeight - 88, alignment: .topLeading)
                         .transition(pageTransition(forward: true))
                 } else {
-                    CodexUsageDetailView(model: model, preferences: preferences, claude: claude) {
+                    CodexUsageDetailView(model: model, preferences: preferences) {
                         navigation.showsSettings = true
                     }
                     .frame(height: CodexEdgeLayout.panelHeight(settings: false, model: model) - 88)
@@ -276,7 +276,6 @@ struct CodexPanelContent: View {
 struct CodexUsageDetailView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var preferences: AppPreferences = .shared
-    @ObservedObject var claude: ClaudeConnection
     var onSettings: () -> Void
 
     private var providers: [ProviderID] { model.configuredProviderIDs }
@@ -353,14 +352,8 @@ struct CodexUsageDetailView: View {
     }
 
     private var claudeHint: String {
-        switch claude.status {
-        case .installed:
-            preferences.text("Waiting for Claude Code's next reply.", "Esperando la próxima respuesta de Claude Code.")
-        case .claudeNotFound:
-            preferences.text("Claude Code is not installed.", "Claude Code no está instalado.")
-        case .notInstalled, .otherStatusLine, .unreadableSettings:
-            preferences.text("Connect Claude Code in Settings.", "Conecta Claude Code en Ajustes.")
-        }
+        preferences.text("Claude Code not found or not signed in.",
+                         "No se encontró Claude Code o no tiene sesión iniciada.")
     }
 
     private func usageRow(_ window: UsageWindow, snapshot: UsageSnapshot, now: Date) -> some View {

@@ -261,15 +261,15 @@ public final class AppModel: ObservableObject {
     /// report their own activity time win; otherwise any window whose usage
     /// rose counts as use observed now.
     static func activity(previous: UsageSnapshot?, next: UsageSnapshot, now: Date) -> Date? {
-        if let reported = next.lastActivityAt { return reported }
-        guard let previous else { return nil }
-        for window in next.windows {
-            if let old = previous.windows.first(where: { $0.durationMinutes == window.durationMinutes }),
-               window.usedPercent > old.usedPercent {
-                return now
+        if let previous {
+            for window in next.windows {
+                if let old = previous.windows.first(where: { $0.durationMinutes == window.durationMinutes }),
+                   window.usedPercent > old.usedPercent {
+                    return max(now, next.lastActivityAt ?? now)
+                }
             }
         }
-        return nil
+        return next.lastActivityAt
     }
 
     static func displayedProvider(

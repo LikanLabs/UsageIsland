@@ -24,9 +24,10 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 ## Estado implementado
 
 - Swift 6, macOS 14+, SwiftUI/AppKit, sin dependencias externas.
-- Claude mediante el puente `--claude-statusline`: Claude Code entrega
-  `rate_limits` a su barra de estado; la app guarda solo porcentajes y reinicios
-  en `~/Library/Application Support/Usage Island/claude-rate-limits.json`.
+- Claude: cada 2 minutos la app consulta a la CLI instalada `get_usage`
+  (aislada, sin prompt ni tokens); cubre terminal, app de escritorio y claude.ai.
+  Opcional: puente `--claude-statusline` para actualizar al instante en la
+  terminal (la app de escritorio no ejecuta barras de estado).
 - Codex real mediante `codex app-server` (JSON-RPC por stdio), reutilizando la
   autenticación de la CLI sin leer credenciales. Sin datos demo en producción.
 - Uso de sesión y semanal con fechas de reinicio absolutas; español, inglés o

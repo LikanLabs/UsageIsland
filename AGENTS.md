@@ -96,9 +96,13 @@ outside the product scope.
 
 ## Claude integration rules
 
-- Read plan limits only from the `rate_limits` field that Claude Code passes to
-  its status line command; the app's own executable is that command
-  (`--claude-statusline`).
+- Read plan limits only from Claude Code itself: the CLI's `get_usage` control
+  request (run isolated with `--restricted`, `--strict-mcp-config`,
+  `--tools ""` and `--no-session-persistence`, no prompt, at most every two
+  minutes), or the `rate_limits` field it passes to its status line command,
+  for which the app's own executable is the command (`--claude-statusline`).
+- The `get_usage` shape is experimental; parse strictly and fall back to the
+  last valid reading.
 - Store only the rate-limit percentages, reset times and capture time.
 - Never read Claude credentials, the Keychain, OAuth tokens or private
   endpoints such as `api/oauth/usage`.
