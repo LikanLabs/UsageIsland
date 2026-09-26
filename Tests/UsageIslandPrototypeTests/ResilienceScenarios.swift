@@ -184,8 +184,14 @@ enum ResilienceScenarios {
         try await eventually { model.freshness(for: .codex) == .fresh }
         let woke = await client.counts()
         try check(woke.requests > sleeping.requests, "wake must refresh")
-        try await Task.sleep(for: .milliseconds(80))
-        let polled = await client.counts()
+        // Wait for a poll instead of a fixed 80 ms: slow CI runners can miss
+        // a 25 ms tick in that window.
+        let pollDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+        var polled = await client.counts()
+        while polled.requests <= woke.requests, ContinuousClock.now < pollDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+            polled = await client.counts()
+        }
         try check(polled.requests > woke.requests, "polling must resume after wake")
         controller.stop()
         let stopped = await client.counts()
