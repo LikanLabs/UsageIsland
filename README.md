@@ -6,8 +6,8 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Usage Island is a small native macOS app that shows Codex usage at the edge of
-the screen. It can sit on the left, right, or below the MacBook notch and opens
+Usage Island is a small native macOS app that shows Codex and Claude Code usage
+at the edge of the screen. It can sit on the left, right, or below the MacBook notch and opens
 a compact panel with the current quota and reset time.
 
 The project is open source and distributed by the [LikanLabs GitHub
@@ -67,6 +67,26 @@ The percentage and ring use the same value. The ring changes from green to
 yellow, orange, and red as the remaining quota decreases. A stale reading keeps
 its last value and is marked in the panel instead of being replaced with a fake
 value.
+
+## Claude Code
+
+Usage Island can also show your Claude subscription limits (5-hour session and
+weekly), the same numbers Claude Code shows in `/usage`.
+
+1. Open the panel, then the gear.
+2. Next to **Claude Code**, click **Connect**.
+
+This adds a status line to `~/.claude/settings.json` that runs Usage Island in
+a small bridge mode. After each Claude reply it saves only the limit
+percentages and reset times to
+`~/Library/Application Support/Usage Island/claude-rate-limits.json` and shows
+`5h 32% · 7d 58%` in Claude Code. Usage Island never reads your Claude
+credentials. If you already have your own status line, it is left untouched.
+**Disconnect** removes the bridge and the saved reading.
+
+Claude usage updates while you use Claude Code; readings older than 15 minutes
+are marked as last known. The pill shows whichever tool you used most
+recently, and the panel shows both.
 
 ## Build locally
 

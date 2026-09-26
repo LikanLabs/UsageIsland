@@ -1,3 +1,14 @@
+# Validation — 2026-09-26 (Claude provider)
+
+- `swift test`: all tests pass, including new bridge, provider, settings
+  installer and active-provider tests with synthetic status line input.
+- The compiled executable in `--claude-statusline` mode stored only rate limits
+  and printed `5h 13% · 7d 40%`; about 10 ms per run once warm (240 ms cold).
+- Rendered pill, usage panel with both providers and settings with synthetic
+  data at 2x; the Claude row and sections fit the panel.
+- Not verified yet: a live Claude Code session feeding the installed app, and
+  automatic switching during real use.
+
 # Validation — 2026-09-26 (review fixes)
 
 Toolchain: Xcode with Apple Swift 6.4. Earlier entries below are historical;

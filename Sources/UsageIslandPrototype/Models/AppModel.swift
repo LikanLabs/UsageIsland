@@ -17,8 +17,15 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var lastUpdatedAt: Date
     @Published public var adaptiveSpacingIsTrusted = false
     @Published public var islandIsVisible = true
+    /// The provider the pill shows: the one used most recently since launch,
+    /// otherwise the previous choice, otherwise the most critical one.
+    @Published public private(set) var displayedProviderID: ProviderID?
 
     private let clock: any UsageClock
+    /// Activity before launch is ignored so an old reading cannot outrank a
+    /// provider that is actually in use now.
+    private let activityCutoff: Date
+    private var lastActivity: [ProviderID: Date] = [:]
     private var providerAdapters: [any UsageProvider]
     private var refreshTask: Task<Void, Never>?
     private var refreshGeneration = 0
@@ -46,8 +53,14 @@ public final class AppModel: ObservableObject {
         initialAgents: [AgentSession]
     ) {
         self.clock = clock
+        activityCutoff = clock.now()
         providerAdapters = configuration.providerAdapters
         providers = configuration.initialSnapshots
+        displayedProviderID = Self.displayedProvider(
+            snapshots: configuration.initialSnapshots,
+            lastActivity: [:],
+            previous: nil
+        )
         connectionStates = configuration.connectionStates
         lastUpdatedAt = configuration.initialSnapshots.map(\.capturedAt).max() ?? clock.now()
         agents = initialAgents
@@ -85,6 +98,18 @@ public final class AppModel: ObservableObject {
         agents.first { $0.status == .failed }
             ?? agents.first { $0.status == .waitingForApproval }
             ?? agents.first { $0.status == .waitingForInput }
+    }
+
+    public var displayedSnapshot: UsageSnapshot? {
+        providers.first { $0.id == displayedProviderID }
+    }
+
+    public var configuredProviderIDs: [ProviderID] {
+        ProviderID.allCases.filter { id in providerAdapters.contains { $0.id == id } }
+    }
+
+    public func snapshot(for provider: ProviderID) -> UsageSnapshot? {
+        providers.first { $0.id == provider }
     }
 
     public func freshness(for provider: ProviderID) -> DataFreshness {
@@ -132,6 +157,27 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    /// Refreshes one provider without cancelling a refresh in progress, for
+    /// cheap sources that change often (Claude's status line record).
+    public func refreshUsage(for provider: ProviderID) async {
+        guard let adapter = providerAdapters.first(where: { $0.id == provider }) else { return }
+        let results = await Self.fetchAll([adapter])
+        guard !Task.isCancelled else { return }
+        merge(results)
+    }
+
+    /// Forgets a provider's reading, for example after the user disconnects it.
+    public func clearUsage(for provider: ProviderID) {
+        providers.removeAll { $0.id == provider }
+        lastActivity[provider] = nil
+        connectionStates[provider] = .disconnected
+        displayedProviderID = Self.displayedProvider(
+            snapshots: providers,
+            lastActivity: lastActivity,
+            previous: displayedProviderID == provider ? nil : displayedProviderID
+        )
+    }
+
     public func suspendRefresh() {
         invalidateRefresh()
         providers = providers.map { snapshot in
@@ -163,7 +209,11 @@ public final class AppModel: ObservableObject {
 
     private func applyRefreshResults(_ results: [RefreshResult], generation: Int) {
         guard generation == refreshGeneration else { return }
+        merge(results)
+        refreshTask = nil
+    }
 
+    private func merge(_ results: [RefreshResult]) {
         var snapshotsByID: [ProviderID: UsageSnapshot] = [:]
         for snapshot in providers {
             snapshotsByID[snapshot.id] = snapshot
@@ -171,10 +221,19 @@ public final class AppModel: ObservableObject {
         var newConnectionStates = connectionStates
         var successfulCapturedDates: [Date] = []
 
+        let now = clock.now()
         for result in results {
             if let snapshot = result.snapshot {
-                snapshotsByID[result.id] = snapshot
+                let previous = snapshotsByID[result.id]
                 newConnectionStates[result.id] = .connected
+                // A slower refresh can finish after a newer single-provider one.
+                if let previous, previous.capturedAt > snapshot.capturedAt { continue }
+                if let activity = Self.activity(previous: previous, next: snapshot, now: now),
+                   activity > activityCutoff,
+                   activity > (lastActivity[result.id] ?? .distantPast) {
+                    lastActivity[result.id] = activity
+                }
+                snapshotsByID[result.id] = snapshot
                 successfulCapturedDates.append(snapshot.capturedAt)
             } else if var previous = snapshotsByID[result.id] {
                 previous.freshness = .stale
@@ -190,7 +249,45 @@ public final class AppModel: ObservableObject {
         if let newestCapture = successfulCapturedDates.max() {
             lastUpdatedAt = newestCapture
         }
-        refreshTask = nil
+        let displayed = Self.displayedProvider(
+            snapshots: providers,
+            lastActivity: lastActivity,
+            previous: displayedProviderID
+        )
+        if displayed != displayedProviderID { displayedProviderID = displayed }
+    }
+
+    /// When `next` shows new use compared with `previous`. Providers that
+    /// report their own activity time win; otherwise any window whose usage
+    /// rose counts as use observed now.
+    static func activity(previous: UsageSnapshot?, next: UsageSnapshot, now: Date) -> Date? {
+        if let reported = next.lastActivityAt { return reported }
+        guard let previous else { return nil }
+        for window in next.windows {
+            if let old = previous.windows.first(where: { $0.durationMinutes == window.durationMinutes }),
+               window.usedPercent > old.usedPercent {
+                return now
+            }
+        }
+        return nil
+    }
+
+    static func displayedProvider(
+        snapshots: [UsageSnapshot],
+        lastActivity: [ProviderID: Date],
+        previous: ProviderID?
+    ) -> ProviderID? {
+        let available = Set(snapshots.map(\.id))
+        if let recent = lastActivity.filter({ available.contains($0.key) })
+            .max(by: { $0.value < $1.value })?.key {
+            return recent
+        }
+        if let previous, available.contains(previous) { return previous }
+        return snapshots.max { lhs, rhs in
+            lhs.priorityScore == rhs.priorityScore
+                ? lhs.id.rawValue > rhs.id.rawValue
+                : lhs.priorityScore < rhs.priorityScore
+        }?.id
     }
 
     private static func validateConfiguration(

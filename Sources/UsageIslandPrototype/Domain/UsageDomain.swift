@@ -2,12 +2,34 @@ import Foundation
 
 public enum ProviderID: String, CaseIterable, Hashable, Identifiable, Sendable {
     case codex
+    case claude
 
     public var id: String { rawValue }
 
-    public var displayName: String { "Codex" }
+    public var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .claude: "Claude"
+        }
+    }
 
-    public var compactSymbol: String { "◈" }
+    public var compactSymbol: String {
+        switch self {
+        case .codex: "◈"
+        case .claude: "✳"
+        }
+    }
+}
+
+/// Converts a provider's floating-point usage into the domain's integer
+/// percent. Values strictly between 99 and 100 stay at 99 so a nearly spent
+/// window is never reported as exhausted while quota remains.
+public enum UsagePercent {
+    public static func canonical(_ value: Double) -> Int? {
+        guard value.isFinite else { return nil }
+        if value > 99 && value < 100 { return 99 }
+        return Int(min(max(value, -1), 101).rounded(.toNearestOrAwayFromZero))
+    }
 }
 
 public enum DataFreshness: Equatable, Sendable {
@@ -107,6 +129,9 @@ public struct UsageWindow: Equatable, Sendable {
 
 public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     public var provider: ProviderID
+    /// When the provider last observed the user consuming quota, if it can
+    /// tell. Providers that cannot leave this nil.
+    public var lastActivityAt: Date?
     public let preferredWindow: UsageWindow
     public let additionalWindows: [UsageWindow]
     public var weeklySpend: Decimal?

@@ -3,6 +3,7 @@ import SwiftUI
 /// Settings live inside the same status-level panel as usage.
 struct AppearanceSettingsView: View {
     @ObservedObject var preferences: AppPreferences = .shared
+    @ObservedObject var claude: ClaudeConnection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -49,6 +50,7 @@ struct AppearanceSettingsView: View {
                     Text(preferences.text("Size", "Tamaño"))
                 }.labelsHidden().controlSize(.small)
             }
+            claudeRow
             HStack {
                 Text(preferences.text("Saved automatically", "Se guarda automáticamente"))
                     .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
@@ -58,6 +60,47 @@ struct AppearanceSettingsView: View {
                     .accessibilityLabel(preferences.text("Restore original size", "Restaurar tamaño original"))
             }
         }.tint(.white)
+    }
+
+    /// Connects Claude Code by installing the status line bridge.
+    private var claudeRow: some View {
+        HStack(spacing: 6) {
+            ProviderMark(provider: .claude, color: .white.opacity(0.7)).frame(width: 12, height: 12)
+            label("Claude Code")
+            Spacer()
+            switch claude.status {
+            case .notInstalled:
+                panelButton(preferences.text("Connect", "Conectar")) { claude.connect() }
+                    .help(preferences.text("Adds a status line to Claude Code that shares its plan usage with Usage Island.",
+                                           "Añade una barra de estado a Claude Code que comparte su consumo del plan con Usage Island."))
+            case .installed:
+                Text(preferences.text("Connected", "Conectado"))
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                panelButton(preferences.text("Disconnect", "Desconectar")) { claude.disconnect() }
+            case .otherStatusLine:
+                note(preferences.text("Custom status line in use", "Ya usas otra barra de estado"))
+                    .help(preferences.text("Usage Island never replaces your own Claude Code status line.",
+                                           "Usage Island nunca reemplaza tu propia barra de estado de Claude Code."))
+            case .claudeNotFound:
+                note(preferences.text("Not installed", "No instalado"))
+            case .unreadableSettings:
+                note(preferences.text("Settings file unreadable", "Ajustes ilegibles"))
+            }
+        }
+        .frame(height: 24)
+        .onAppear { claude.reloadStatus() }
+    }
+
+    private func panelButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.system(size: 11, weight: .medium)).buttonStyle(.plain)
+            .padding(.horizontal, 8).frame(height: 22)
+            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
     }
 
     private func label(_ text: String) -> some View {

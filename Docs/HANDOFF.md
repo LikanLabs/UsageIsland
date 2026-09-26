@@ -15,12 +15,18 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
   (`IslandWindowController`, `PulseView`, `UnifiedIsland*`, `WingViews`,
   `VisualTokens`, `BeaconController`, `MenuBarOccupancyService`, `Formatting`).
   `AGENTS.md` declara ahora CodexEdge como línea base visual.
+- El 26 de septiembre pidió agregar Claude: la pill muestra el proveedor usado
+  más recientemente y el panel muestra ambos. Claude se conecta desde Ajustes con
+  un puente de barra de estado (sin leer credenciales).
 - Firma Developer ID y notarización: opcionales vía secretos de GitHub (ver
   README). Sin secretos, el release se firma ad hoc como hasta ahora.
 
 ## Estado implementado
 
 - Swift 6, macOS 14+, SwiftUI/AppKit, sin dependencias externas.
+- Claude mediante el puente `--claude-statusline`: Claude Code entrega
+  `rate_limits` a su barra de estado; la app guarda solo porcentajes y reinicios
+  en `~/Library/Application Support/Usage Island/claude-rate-limits.json`.
 - Codex real mediante `codex app-server` (JSON-RPC por stdio), reutilizando la
   autenticación de la CLI sin leer credenciales. Sin datos demo en producción.
 - Uso de sesión y semanal con fechas de reinicio absolutas; español, inglés o
@@ -35,7 +41,10 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 
 Rutas relativas a `Sources/UsageIslandPrototype/`:
 
-- `UI/CodexEdgeView.swift`, `UI/AppearanceSettingsView.swift`, `UI/CodexMark.swift`: interfaz.
+- `UI/CodexEdgeView.swift`, `UI/AppearanceSettingsView.swift`, `UI/CodexMark.swift`,
+  `UI/ClaudeMark.swift`: interfaz.
+- `Infrastructure/Claude/`, `Providers/Claude/`, `Store/ClaudeConnection.swift`: puente,
+  instalador del `statusLine` y proveedor de Claude.
 - `Window/CodexEdgeWindowController.swift`, `EdgeWindowGeometry.swift`,
   `DockVisibilityState.swift`, `EdgePanelNavigation.swift`, `ScreenNotchGeometry.swift`:
   ventanas, geometría y auto-hide.

@@ -6,6 +6,7 @@ import SwiftUI
 final class CodexEdgeWindowController {
     private let model: AppModel
     private let preferences: AppPreferences
+    private let claude: ClaudeConnection
     private let displayScale = EdgeDisplayScale()
     private let navigation = EdgePanelNavigation()
     private var tab: NSPanel?
@@ -22,8 +23,9 @@ final class CodexEdgeWindowController {
     private var screensAsleep = false
     private var animationID = 0
 
-    init(model: AppModel, preferences: AppPreferences = .shared) {
+    init(model: AppModel, claude: ClaudeConnection, preferences: AppPreferences = .shared) {
         self.model = model
+        self.claude = claude
         self.preferences = preferences
     }
 
@@ -33,7 +35,7 @@ final class CodexEdgeWindowController {
             self?.togglePulse()
         }))
         tab?.title = "Codex Usage Tab"
-        detail = makePanel(CodexPanelContent(model: model, preferences: preferences, displayScale: displayScale, navigation: navigation, onClose: { [weak self] in
+        detail = makePanel(CodexPanelContent(model: model, preferences: preferences, displayScale: displayScale, navigation: navigation, claude: claude, onClose: { [weak self] in
             self?.model.closePulse()
         }))
         detail?.title = "Codex Usage Details"
@@ -127,7 +129,7 @@ final class CodexEdgeWindowController {
             requestedScale: preferences.scale, backingScale: screen.backingScaleFactor,
             position: preferences.position, topInset: screen.safeAreaInsets.top,
             notchFrame: notch.hasHardwareNotch ? notch.notchFrame : nil,
-            detailHeight: CodexEdgeLayout.envelopeHeight(snapshot: model.providers.first { $0.id == .codex })
+            detailHeight: CodexEdgeLayout.envelopeHeight(model: model)
         )
         // Periodic usage refreshes also land here; only re-run the indicator
         // animation when its frame moved or it is missing from the screen.
@@ -247,7 +249,7 @@ final class CodexEdgeWindowController {
 
     private var visibleDetailFrame: CGRect? {
         geometry?.visibleDetail(
-            height: CodexEdgeLayout.panelHeight(settings: navigation.showsSettings, snapshot: model.providers.first { $0.id == .codex }),
+            height: CodexEdgeLayout.panelHeight(settings: navigation.showsSettings, model: model),
             position: preferences.position
         )
     }

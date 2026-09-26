@@ -3,8 +3,9 @@ import XCTest
 @testable import UsageIslandPrototype
 
 final class UsageIslandPrototypeTests: XCTestCase {
-  func testProviderCatalogContainsOnlyCodex() {
-    XCTAssertEqual(ProviderID.allCases, [.codex])
+  func testProviderCatalogContainsCodexAndClaude() {
+    XCTAssertEqual(ProviderID.allCases, [.codex, .claude])
+    XCTAssertEqual(ProviderID.claude.displayName, "Claude")
   }
 
   func testPriorityMakesCriticalProviderFirst() throws {

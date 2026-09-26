@@ -6,9 +6,11 @@ import XCTest
 
 @MainActor
 final class LiveCompositionTests: XCTestCase {
+    private static let missingClaudeRecord = FileManager.default.temporaryDirectory
+        .appendingPathComponent("usage-island-tests-\(UUID())/claude-rate-limits.json")
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
-    func testLiveCompositionStartsWithOnlyCodexAndNoInventedUsage() {
+    func testLiveCompositionStartsWithoutInventedUsage() {
         let harness = makeLiveHarness()
 
         XCTAssertEqual(harness.composition.model.providers.map(\.id), [])
@@ -18,7 +20,7 @@ final class LiveCompositionTests: XCTestCase {
         )
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.codex: .disconnected]
+            [.codex: .disconnected, .claude: .disconnected]
         )
         XCTAssertEqual(harness.composition.model.freshness(for: .codex), .unavailable)
     }
@@ -135,7 +137,8 @@ final class LiveCompositionTests: XCTestCase {
         let client = LiveFakeCodexClient()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator
+            locator: locator,
+            claudeRecordURL: Self.missingClaudeRecord
         ) { _, clock in
             probe.make(client: client, clock: clock)
         }
@@ -254,7 +257,7 @@ final class LiveCompositionTests: XCTestCase {
         )
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.codex: .disconnected]
+            [.codex: .disconnected, .claude: .disconnected]
         )
         XCTAssertEqual(delegate.requestTermination(), .terminateNow)
         XCTAssertEqual(replies.values, [true])
@@ -277,7 +280,7 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(shutdownCalls, 1)
         XCTAssertEqual(
             harness.composition.model.connectionStates,
-            [.codex: .disconnected]
+            [.codex: .disconnected, .claude: .disconnected]
         )
     }
 
@@ -289,7 +292,8 @@ final class LiveCompositionTests: XCTestCase {
         )
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator
+            locator: locator,
+            claudeRecordURL: Self.missingClaudeRecord
         )
         let replies = TerminationReplyRecorder()
         let delegate = AppDelegate(
@@ -317,7 +321,8 @@ final class LiveCompositionTests: XCTestCase {
         let client = LiveFakeCodexClient()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator
+            locator: locator,
+            claudeRecordURL: Self.missingClaudeRecord
         ) { _, clock in
             probe.make(client: client, clock: clock)
         }
@@ -356,7 +361,8 @@ final class LiveCompositionTests: XCTestCase {
         let recorder = LocatedExecutableRecorder()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator
+            locator: locator,
+            claudeRecordURL: Self.missingClaudeRecord
         ) { configuration, clock in
             recorder.record(configuration.executableURL)
             return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
@@ -385,7 +391,8 @@ final class LiveCompositionTests: XCTestCase {
                 ],
                 commonSearchPaths: [],
                 isExecutable: { $0.lastPathComponent == "codex" }
-            )
+            ),
+            claudeRecordURL: Self.missingClaudeRecord
         ) { configuration, clock in
             recorder.record(configuration.executableURL)
             return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
@@ -426,7 +433,8 @@ final class LiveCompositionTests: XCTestCase {
         )
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator
+            locator: locator,
+            claudeRecordURL: Self.missingClaudeRecord
         ) { _, clock in
             providerFactory?(client, clock)
                 ?? CodexUsageProvider(client: client, clock: clock)

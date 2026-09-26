@@ -10,7 +10,8 @@ pill with the Codex mark inside a usage ring, and a details panel that holds
 both usage and settings. The user explicitly approved it on 2026-09-05 as the
 replacement for the earlier v26 prototype, which was removed on 2026-09-26.
 
-The product supports Codex only. Changes must keep the interface as approved.
+The product supports Codex and Claude Code. The pill shows the provider in
+use most recently; the details panel shows every provider.
 
 ## Non-negotiable visual baseline
 
@@ -57,7 +58,7 @@ Backend work must adapt to the existing frontend, not the opposite.
 New backend code must be separated into these responsibilities:
 
 - Domain: provider-independent models and errors.
-- Providers: Codex adapters.
+- Providers: Codex and Claude adapters.
 - Infrastructure: processes, JSON-RPC, caching, clocks and filesystem access.
 - Store: observable application state consumed by the existing UI.
 - AgentMonitoring: agent discovery and normalized activity.
@@ -67,8 +68,9 @@ responses, launch subprocesses, read credentials or calculate provider rules.
 
 ## Provider scope
 
-Usage Island supports Codex through `codex app-server`. Other usage providers
-and synthetic demo providers are outside the product scope.
+Usage Island supports Codex through `codex app-server` and Claude Code through
+its status line bridge. Other usage providers and synthetic demo providers are
+outside the product scope.
 
 ## Data rules
 
@@ -91,6 +93,17 @@ and synthetic demo providers are outside the product scope.
 - Treat stderr as diagnostics, never as protocol data.
 - Use bounded timeouts and graceful process shutdown.
 - Redact secrets and personal information from logs.
+
+## Claude integration rules
+
+- Read plan limits only from the `rate_limits` field that Claude Code passes to
+  its status line command; the app's own executable is that command
+  (`--claude-statusline`).
+- Store only the rate-limit percentages, reset times and capture time.
+- Never read Claude credentials, the Keychain, OAuth tokens or private
+  endpoints such as `api/oauth/usage`.
+- Change only the `statusLine` key of `~/.claude/settings.json`, only on the
+  user's request, and never replace a status line the user already has.
 
 ## Security
 
