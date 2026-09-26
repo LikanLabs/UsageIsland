@@ -10,6 +10,8 @@ actor LocatingCodexUsageProvider: UsageProvider {
         any UsageClock
     ) -> CodexUsageProvider
     private var inner: CodexUsageProvider?
+    private var innerExecutableURL: URL?
+    private var isShutDown = false
 
     init(
         locator: ExecutableLocator,
@@ -25,6 +27,9 @@ actor LocatingCodexUsageProvider: UsageProvider {
     }
 
     func fetchUsage() async throws -> UsageSnapshot {
+        guard !isShutDown else {
+            throw CancellationError()
+        }
         let executableURL: URL
         do {
             executableURL = try locator.locate("codex")
@@ -32,18 +37,29 @@ actor LocatingCodexUsageProvider: UsageProvider {
             throw CodexUsageError.appServerFailure(.executableUnavailable)
         }
 
-        if inner == nil {
+        // Reinstalling or upgrading Codex can move the executable; retire the
+        // provider bound to the old path instead of relaunching it forever.
+        var retired: CodexUsageProvider?
+        if inner == nil || innerExecutableURL != executableURL {
+            retired = inner
             inner = makeCodexProvider(
                 CodexAppServerConfiguration(executableURL: executableURL),
                 clock
             )
+            innerExecutableURL = executableURL
         }
-        return try await inner!.fetchUsage()
+        let provider = inner!
+        if let retired {
+            try? await retired.shutdown()
+        }
+        return try await provider.fetchUsage()
     }
 
     func shutdown() async throws {
+        isShutDown = true
         let provider = inner
         inner = nil
+        innerExecutableURL = nil
         try await provider?.shutdown()
     }
 }

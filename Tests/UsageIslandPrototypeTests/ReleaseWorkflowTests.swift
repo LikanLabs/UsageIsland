@@ -23,9 +23,18 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertLessThan(testIndex, resilienceIndex)
         XCTAssertLessThan(resilienceIndex, packageIndex)
         XCTAssertLessThan(packageIndex, publishIndex)
+        let verifyJobIndex = try firstIndex(of: "  verify:", in: yaml)
+        let releaseNeedsIndex = try firstIndex(of: "needs: verify", in: yaml)
+
+        XCTAssertLessThan(verifyJobIndex, testIndex)
+        XCTAssertLessThan(resilienceIndex, releaseNeedsIndex)
+        XCTAssertLessThan(releaseNeedsIndex, packageIndex)
         XCTAssertFalse(yaml.contains("continue-on-error: true"))
-        XCTAssertFalse(yaml.contains("if: always()"))
-        XCTAssertTrue(yaml.contains("tags: ['v*.*.*']"))
+        // Only keychain cleanup may run after a failure; publishing must not.
+        for line in yaml.split(separator: "\n") where line.contains("if: always()") {
+            XCTAssertTrue(line.contains("DEVELOPER_ID_CERTIFICATE_P12"), String(line))
+        }
+        XCTAssertTrue(yaml.contains("tags: ['v[0-9]+.[0-9]+.[0-9]+']"))
     }
 
     private func firstIndex(of needle: String, in yaml: String) throws -> String.Index {

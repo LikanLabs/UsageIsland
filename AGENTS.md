@@ -2,43 +2,42 @@
 
 ## Product
 
-Usage Island is a native macOS application that extends both sides of the
-MacBook notch to show AI coding usage and agent activity.
+Usage Island is a native macOS application that shows AI coding usage at the
+edge of the screen: beside the MacBook notch, or on the left or right edge.
 
-The approved visual baseline is the v26 prototype.
+The approved visual baseline is the black CodexEdge interface: an attached
+pill with the Codex mark inside a usage ring, and a details panel that holds
+both usage and settings. The user explicitly approved it on 2026-09-05 as the
+replacement for the earlier v26 prototype, which was removed on 2026-09-26.
 
 The current implementation phase is to replace demo data with real provider
 data without redesigning the interface.
 
 ## Non-negotiable visual baseline
 
-Do not redesign, resize, restyle, simplify, or reinterpret the approved v26 UI.
+Do not redesign, resize, restyle, simplify, or reinterpret the approved
+CodexEdge UI.
 
 Preserve:
 
-- notch geometry;
-- left and right wings;
-- Pulse panel dimensions;
-- Core Animation surface renderer;
-- opening and closing animations;
-- provider expansion animation;
-- typography;
-- spacing;
-- colors;
-- corner radii;
-- provider row layout;
-- active-agent section;
-- footer layout.
+- the pill attached to the screen edge or the base of the notch;
+- left, right and top (notch) positions and the auto-hide behavior;
+- the usage ring, its remaining-quota colors and the dashed stale state;
+- details panel dimensions, corner radii, spacing and typography;
+- usage rows, footer controls and the in-panel settings page;
+- opening, closing and page-transition animations, including Reduce Motion;
+- the geometry in `EdgeWindowGeometry` and `ScreenNotchGeometry`.
 
 Do not modify these files unless the user explicitly requests a visual change
 or a compile fix:
 
-- Sources/UsageIslandPrototype/UI/PulseView.swift
-- Sources/UsageIslandPrototype/UI/UnifiedIslandSurfaceView.swift
-- Sources/UsageIslandPrototype/UI/UnifiedIslandView.swift
-- Sources/UsageIslandPrototype/UI/VisualTokens.swift
-- Sources/UsageIslandPrototype/UI/WingViews.swift
-- Sources/UsageIslandPrototype/Window/IslandWindowController.swift
+- Sources/UsageIslandPrototype/UI/CodexEdgeView.swift
+- Sources/UsageIslandPrototype/UI/CodexMark.swift
+- Sources/UsageIslandPrototype/UI/AppearanceSettingsView.swift
+- Sources/UsageIslandPrototype/Window/CodexEdgeWindowController.swift
+- Sources/UsageIslandPrototype/Window/EdgeWindowGeometry.swift
+- Sources/UsageIslandPrototype/Window/EdgePanelNavigation.swift
+- Sources/UsageIslandPrototype/Window/DockVisibilityState.swift
 - Sources/UsageIslandPrototype/Window/ScreenNotchGeometry.swift
 
 Backend work must adapt to the existing frontend, not the opposite.
@@ -116,12 +115,12 @@ Before modifying code:
 
 1. Inspect the relevant implementation and tests.
 2. State which files will change.
-3. Explain how the v26 visual baseline will remain unchanged.
+3. Explain how the CodexEdge visual baseline will remain unchanged.
 4. Prefer the smallest coherent change.
 
 After modifying code:
 
-1. Run `swift test`.
+1. Run `swift test` and `./Scripts/verify-resilience.sh`.
 2. Build the macOS executable when AppKit is available.
 3. Inspect `git diff`.
 4. Report tests, failures, limitations and changed files.

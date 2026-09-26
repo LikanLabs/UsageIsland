@@ -117,6 +117,36 @@ final class JSONRPCClientTests: XCTestCase {
         try await client.shutdown()
     }
 
+    func testServerRequestIsAnsweredWithMethodNotFoundWithoutClosingTransport() async throws {
+        let transport = FakeJSONRPCTransport()
+        let client = JSONRPCClient(transport: transport)
+        try await client.start()
+
+        await transport.emitLine(
+            #"{"id":"srv-1","method":"account/chatgptAuthTokens/refresh","params":{}}"#
+        )
+
+        let replyData = try await transport.dataSent(at: 0)
+        let reply = try JSONSerialization.jsonObject(
+            with: replyData
+        ) as? [String: Any]
+        XCTAssertEqual(reply?["id"] as? String, "srv-1")
+        XCTAssertNil(reply?["method"])
+        let error = reply?["error"] as? [String: Any]
+        XCTAssertEqual(error?["code"] as? Int, -32601)
+
+        let requestTask = makeTrackedTask {
+            try await client.request(method: "still/alive")
+        }
+        let outbound = try decodeOutbound(try await transport.dataSent(at: 1))
+        await transport.emit(
+            try successResponse(id: XCTUnwrap(outbound.id), result: .bool(true))
+        )
+        let result = try await boundedValue(of: requestTask)
+        XCTAssertEqual(result, .bool(true))
+        try await client.shutdown()
+    }
+
     func testRemoteErrorDiscardsSensitiveMessage() async throws {
         let transport = FakeJSONRPCTransport()
         let client = JSONRPCClient(transport: transport)

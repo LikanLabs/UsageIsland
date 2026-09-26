@@ -182,6 +182,76 @@ final class ManagedProcessTests: XCTestCase {
         }
     }
 
+    func testRealBackpressuredWriteResumesWhenChildStartsReading() async throws {
+        // The payload exceeds the pipe buffer while the child sleeps, so the
+        // write must hit EAGAIN and resume from the dispatch write source.
+        let payloadSize = 1_048_576
+        let process = ManagedProcess(
+            configuration: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    "sleep 0.5; head -c \(payloadSize) >/dev/null; echo drained"
+                ],
+                maximumPendingInputWrites: 2,
+                maximumInputWriteSize: payloadSize,
+                maximumPendingInputBytes: payloadSize
+            ),
+            shutdownScheduler: ControlledTimeoutScheduler()
+        )
+        let stream = await process.incomingBytes()
+        try await process.start()
+        try await process.send(Data(repeating: 0x61, count: payloadSize))
+
+        let collected = CollectedBytes()
+        try await withOuterTimeout(.seconds(10)) {
+            do {
+                for try await chunk in stream {
+                    await collected.append(chunk)
+                }
+            } catch {}
+        }
+
+        let stdout = await collected.data
+        XCTAssertEqual(String(decoding: stdout, as: UTF8.self), "drained\n")
+        try await process.shutdown()
+    }
+
+    func testDirectExitIsReportedWhenDescendantRetainsStdout() async throws {
+        let process = ManagedProcess(
+            configuration: .init(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "sleep 30 & echo $!; exit 3"]
+            ),
+            shutdownScheduler: ControlledTimeoutScheduler(),
+            standardOutputDrainGracePeriod: .milliseconds(200)
+        )
+        let stream = await process.incomingBytes()
+        try await process.start()
+
+        let collected = CollectedBytes()
+        let terminal = TerminalErrorBox()
+        try await withOuterTimeout(.seconds(5)) {
+            do {
+                for try await chunk in stream {
+                    await collected.append(chunk)
+                }
+            } catch {
+                await terminal.set(error as? JSONRPCError)
+            }
+        }
+        let output = String(decoding: await collected.data, as: UTF8.self)
+        if let descendant = Int32(
+            output.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) {
+            _ = Darwin.kill(descendant, SIGKILL)
+        }
+
+        let terminalError = await terminal.error
+        XCTAssertEqual(terminalError, .processExited(status: 3))
+        try await process.shutdown()
+    }
+
     func testDirectExitAbortsWriteWhenDescendantRetainsStdin() async throws {
         let swiftExecutable = "/usr/bin/swift"
         let tailExecutable = "/usr/bin/tail"
@@ -1729,4 +1799,20 @@ private enum OuterTimeoutOutcome: Sendable {
 private enum OuterValueTimeoutOutcome<Value: Sendable>: Sendable {
     case value(Value)
     case timedOut
+}
+
+private actor CollectedBytes {
+    private(set) var data = Data()
+
+    func append(_ chunk: Data) {
+        data.append(chunk)
+    }
+}
+
+private actor TerminalErrorBox {
+    private(set) var error: JSONRPCError?
+
+    func set(_ error: JSONRPCError?) {
+        self.error = error
+    }
 }

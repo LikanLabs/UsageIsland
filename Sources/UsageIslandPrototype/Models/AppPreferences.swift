@@ -49,8 +49,15 @@ final class AppPreferences: ObservableObject {
     var isSpanish: Bool {
         language == .spanish || (language == .system && Locale.preferredLanguages.first?.hasPrefix("es") == true)
     }
+    /// Dates follow the displayed text language while keeping the user's
+    /// region and clock preferences, so text and dates never mix languages.
     var locale: Locale {
-        language == .system ? .autoupdatingCurrent : Locale(identifier: isSpanish ? "es" : "en")
+        let code = isSpanish ? "es" : "en"
+        let current = Locale.autoupdatingCurrent
+        if current.language.languageCode?.identifier == code { return current }
+        var components = Locale.Components(locale: current)
+        components.languageComponents = Locale.Language.Components(languageCode: .init(code))
+        return Locale(components: components)
     }
     func text(_ english: String, _ spanish: String) -> String { isSpanish ? spanish : english }
 

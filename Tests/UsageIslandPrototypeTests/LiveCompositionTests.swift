@@ -201,32 +201,10 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(model.scenario, .waiting)
     }
 
-    func testLiveBeaconHidesDemoScenarios() {
-        XCTAssertTrue(BeaconController.demoScenarios(whenAllowed: false).isEmpty)
-    }
-
-    func testDemoBeaconPreservesEveryScenario() {
+    func testDemoModelProvidesDemoAgents() {
         let model = AppDelegate.makeDemoModel(clock: FixedLiveClock(now))
 
-        XCTAssertEqual(
-            BeaconController.demoScenarios(whenAllowed: true),
-            DemoScenario.allCases
-        )
         XCTAssertFalse(model.agents.isEmpty)
-    }
-
-    func testPulseRefreshActionUsesLiveRefreshWithoutApplyingDemoScenario() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let pulseURL = repositoryRoot.appendingPathComponent(
-            "Sources/UsageIslandPrototype/UI/PulseView.swift"
-        )
-        let source = try String(contentsOf: pulseURL, encoding: .utf8)
-
-        XCTAssertTrue(source.contains("Task { await model.refreshUsage() }"))
-        XCTAssertFalse(source.contains("model.applyScenario(model.scenario)"))
     }
 
     func testTerminationRepliesOnceAndShutsDownCodexOnceAcrossRepeatedRequests() async {
@@ -369,6 +347,69 @@ final class LiveCompositionTests: XCTestCase {
         XCTAssertEqual(probe.calls, 1)
         XCTAssertEqual(model.providers.map(\.id), [.codex])
         XCTAssertEqual(model.connectionStates[.codex], .connected)
+    }
+
+    func testLiveCompositionReplacesProviderWhenCodexExecutableMoves() async throws {
+        let firstLocationAvailable = ExecutableAvailability(true)
+        let locator = ExecutableLocator(
+            environmentPath: nil,
+            additionalSearchPaths: [
+                URL(fileURLWithPath: "/synthetic/old", isDirectory: true),
+                URL(fileURLWithPath: "/synthetic/new", isDirectory: true)
+            ],
+            commonSearchPaths: [],
+            isExecutable: { url in
+                url.lastPathComponent == "codex"
+                    && (url.path.hasPrefix("/synthetic/new")
+                        || firstLocationAvailable.isAvailable)
+            }
+        )
+        let recorder = LocatedExecutableRecorder()
+        let composition = AppDelegate.makeLiveComposition(
+            clock: FixedLiveClock(now),
+            locator: locator
+        ) { configuration, clock in
+            recorder.record(configuration.executableURL)
+            return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
+        }
+
+        await composition.model.refreshUsage()
+        firstLocationAvailable.isAvailable = false
+        await composition.model.refreshUsage()
+        await composition.model.refreshUsage()
+
+        XCTAssertEqual(
+            recorder.paths,
+            ["/synthetic/old/codex", "/synthetic/new/codex"]
+        )
+        XCTAssertEqual(composition.model.connectionStates[.codex], .connected)
+    }
+
+    func testLocatingProviderRefusesToRelaunchAfterShutdown() async throws {
+        let recorder = LocatedExecutableRecorder()
+        let composition = AppDelegate.makeLiveComposition(
+            clock: FixedLiveClock(now),
+            locator: ExecutableLocator(
+                environmentPath: nil,
+                additionalSearchPaths: [
+                    URL(fileURLWithPath: "/synthetic/bin", isDirectory: true)
+                ],
+                commonSearchPaths: [],
+                isExecutable: { $0.lastPathComponent == "codex" }
+            )
+        ) { configuration, clock in
+            recorder.record(configuration.executableURL)
+            return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
+        }
+
+        try await composition.codexUsageProvider.shutdown()
+        do {
+            _ = try await composition.codexUsageProvider.fetchUsage()
+            XCTFail("Expected fetch after shutdown to fail")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(recorder.paths, [])
     }
 
     private func makeLiveHarness(
@@ -643,5 +684,18 @@ private actor LiveTestGate {
         let observers = cancellationObservers
         cancellationObservers.removeAll()
         observers.forEach { $0.resume() }
+    }
+}
+
+private final class LocatedExecutableRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var paths: [String] {
+        lock.withLock { recorded }
+    }
+
+    func record(_ url: URL) {
+        lock.withLock { recorded.append(url.path) }
     }
 }

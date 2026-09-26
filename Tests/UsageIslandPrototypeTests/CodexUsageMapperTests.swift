@@ -458,6 +458,9 @@ final class CodexUsageMapperTests: XCTestCase {
             (.number(48.5), 49),
             (.number(48.6), 49),
             (.number(-0.6), 0),
+            (.number(99.5), 99),
+            (.number(99.99), 99),
+            (.number(100.0), 100),
             (.number(100.6), 100)
         ]
 

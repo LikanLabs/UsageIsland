@@ -102,7 +102,24 @@ notch geometry.
 
 Pushing a version tag such as `v0.1.1` runs the release workflow. It builds an
 Apple Silicon and Intel app, creates a ZIP archive, publishes a SHA-256 file,
-and attaches both files to the GitHub release.
+and attaches both files to the GitHub release. Re-running the workflow for the
+same tag replaces those files.
+
+Developer ID signing and notarization are optional. When these repository
+secrets exist, the workflow signs with the hardened runtime, notarizes, and
+staples the app; otherwise it signs ad hoc:
+
+| Secret | Contents |
+| --- | --- |
+| `DEVELOPER_ID_CERTIFICATE_P12` | Base64 of the exported Developer ID Application `.p12` |
+| `DEVELOPER_ID_CERTIFICATE_PASSWORD` | Password of that `.p12` |
+| `DEVELOPER_ID_IDENTITY` | Identity name, e.g. `Developer ID Application: Name (TEAMID)` |
+| `NOTARY_API_KEY_P8` | Contents of an App Store Connect API key (`.p8`) |
+| `NOTARY_API_KEY_ID` | That key's ID |
+| `NOTARY_API_ISSUER` | The App Store Connect issuer ID |
+
+Locally, `./Scripts/notarize-app.sh <keychain-profile>` notarizes a build made
+with `USAGE_ISLAND_SIGNING_IDENTITY` set.
 
 The Homebrew cask lives in [LikanLabs/homebrew-tap](https://github.com/LikanLabs/homebrew-tap)
 and is updated for each release.

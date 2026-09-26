@@ -205,6 +205,7 @@ private actor NonblockingProcessInput {
     private var writableSource: DispatchSourceWrite?
     private var writableContinuation:
         CheckedContinuation<Void, Error>?
+    private var writableWaitGeneration: UInt64 = 0
 
     init(handle: FileHandle) {
         self.handle = handle
@@ -291,20 +292,27 @@ private actor NonblockingProcessInput {
             return
         }
         writableContinuation = continuation
+        writableWaitGeneration &+= 1
+        let generation = writableWaitGeneration
         let source = DispatchSource.makeWriteSource(
             fileDescriptor: descriptor,
             queue: .global(qos: .utility)
         )
-        source.setEventHandler { [self] in
+        // Dispatch runs this on its own queue, so it must not inherit
+        // actor isolation; the Swift 6 runtime traps if it does.
+        source.setEventHandler { @Sendable [weak self] in
             Task {
-                didBecomeWritable()
+                await self?.didBecomeWritable(generation: generation)
             }
         }
         writableSource = source
         source.resume()
     }
 
-    private func didBecomeWritable() {
+    private func didBecomeWritable(generation: UInt64) {
+        guard generation == writableWaitGeneration else {
+            return
+        }
         writableSource?.cancel()
         writableSource = nil
         let continuation = writableContinuation
@@ -658,6 +666,7 @@ public actor ManagedProcess: JSONRPCTransport {
     private let shutdownStartGate: @Sendable () async -> Void
     private let terminationGracePeriod: Duration
     private let killGracePeriod: Duration
+    private let standardOutputDrainGracePeriod: Duration
     private let output: BoundedProcessOutput
     private let exitMonitor = ProcessExitMonitor()
     private let inputWriteProbe = ProcessInputWriteProbe()
@@ -672,6 +681,7 @@ public actor ManagedProcess: JSONRPCTransport {
     private var standardError: FileHandle?
     private var observedExitStatus: Int32?
     private var standardOutputReachedEnd = false
+    private var standardOutputDrainTask: Task<Void, Never>?
     private var standardOutputReadabilityInvocations = 0
     private var standardErrorReadabilityInvocations = 0
     private var standardOutputEOFInvocations = 0
@@ -687,7 +697,8 @@ public actor ManagedProcess: JSONRPCTransport {
         processFactory: any ManagedChildProcessFactory =
             FoundationManagedChildProcessFactory(),
         terminationGracePeriod: Duration = .seconds(2),
-        killGracePeriod: Duration = .seconds(1)
+        killGracePeriod: Duration = .seconds(1),
+        standardOutputDrainGracePeriod: Duration = .seconds(1)
     ) {
         self.configuration = configuration
         self.shutdownScheduler = shutdownScheduler
@@ -699,6 +710,7 @@ public actor ManagedProcess: JSONRPCTransport {
         shutdownStartGate = {}
         self.terminationGracePeriod = terminationGracePeriod
         self.killGracePeriod = killGracePeriod
+        self.standardOutputDrainGracePeriod = standardOutputDrainGracePeriod
         output = BoundedProcessOutput(
             maximumBufferedChunks: configuration.maximumBufferedOutputChunks,
             maximumChunkSize: configuration.maximumOutputChunkSize
@@ -713,7 +725,8 @@ public actor ManagedProcess: JSONRPCTransport {
         inputOperations: ProcessInputOperations,
         shutdownStartGate: @escaping @Sendable () async -> Void = {},
         terminationGracePeriod: Duration = .seconds(2),
-        killGracePeriod: Duration = .seconds(1)
+        killGracePeriod: Duration = .seconds(1),
+        standardOutputDrainGracePeriod: Duration = .seconds(1)
     ) {
         self.configuration = configuration
         self.shutdownScheduler = shutdownScheduler
@@ -725,6 +738,7 @@ public actor ManagedProcess: JSONRPCTransport {
         self.shutdownStartGate = shutdownStartGate
         self.terminationGracePeriod = terminationGracePeriod
         self.killGracePeriod = killGracePeriod
+        self.standardOutputDrainGracePeriod = standardOutputDrainGracePeriod
         output = BoundedProcessOutput(
             maximumBufferedChunks: configuration.maximumBufferedOutputChunks,
             maximumChunkSize: configuration.maximumOutputChunkSize
@@ -755,8 +769,9 @@ public actor ManagedProcess: JSONRPCTransport {
 
         let boundedOutput = output
         let outputHandle = outputPipe.fileHandleForReading
+        let outputDescriptor = outputHandle.fileDescriptor
         outputHandle.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
+            let data = Self.readAvailable(from: outputDescriptor)
             let reachedEnd = data.isEmpty
             let yieldError = reachedEnd ? nil : boundedOutput.yield(data)
             if reachedEnd {
@@ -773,8 +788,9 @@ public actor ManagedProcess: JSONRPCTransport {
         }
 
         let errorHandle = errorPipe.fileHandleForReading
+        let errorDescriptor = errorHandle.fileDescriptor
         errorHandle.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
+            let data = Self.readAvailable(from: errorDescriptor)
             let reachedEnd = data.isEmpty
             if reachedEnd {
                 handle.readabilityHandler = nil
@@ -1179,6 +1195,7 @@ public actor ManagedProcess: JSONRPCTransport {
         switch state {
         case .starting, .running:
             guard standardOutputReachedEnd else {
+                scheduleStandardOutputDrainDeadline(for: status)
                 return
             }
             output.finish(
@@ -1194,6 +1211,55 @@ public actor ManagedProcess: JSONRPCTransport {
         inputWriterTerminationError = await inputWriter?.finishClose()
         cleanUpHandlesAfterObservedExit()
         state = .stopped
+    }
+
+    /// A descendant that inherited stdout can keep the pipe open after the
+    /// child exits. Stop waiting for EOF after a bounded grace period so the
+    /// exit still reaches readers instead of surfacing only as request
+    /// timeouts.
+    private func scheduleStandardOutputDrainDeadline(for status: Int32) {
+        guard standardOutputDrainTask == nil else {
+            return
+        }
+        let gracePeriod = standardOutputDrainGracePeriod
+        standardOutputDrainTask = Task { [weak self] in
+            try? await Task.sleep(for: gracePeriod)
+            await self?.standardOutputDrainDeadlineReached(status: status)
+        }
+    }
+
+    private func standardOutputDrainDeadlineReached(status: Int32) async {
+        guard !standardOutputReachedEnd,
+              observedExitStatus == status,
+              process != nil else {
+            return
+        }
+        switch state {
+        case .starting, .running:
+            standardOutputReachedEnd = true
+            await completeObservedExit(status: status)
+        case .idle, .stopping, .failing, .stopped:
+            break
+        }
+    }
+
+    /// Reads whatever is available without Foundation's `availableData`,
+    /// which raises an Objective-C exception if cleanup closed the handle
+    /// while this handler was already running. Errors are treated as EOF.
+    private nonisolated static func readAvailable(from descriptor: Int32) -> Data {
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { bytes in
+                Darwin.read(descriptor, bytes.baseAddress, bytes.count)
+            }
+            if count > 0 {
+                return Data(buffer[0..<count])
+            }
+            if count < 0, errno == EINTR {
+                continue
+            }
+            return Data()
+        }
     }
 
     private func completeShutdownAfterObservedExit(
@@ -1219,6 +1285,8 @@ public actor ManagedProcess: JSONRPCTransport {
         guard observedExitStatus != nil else {
             return
         }
+        standardOutputDrainTask?.cancel()
+        standardOutputDrainTask = nil
         standardOutput?.readabilityHandler = nil
         standardError?.readabilityHandler = nil
         try? standardOutput?.close()
@@ -1233,6 +1301,8 @@ public actor ManagedProcess: JSONRPCTransport {
 
     private func cleanUpFailedLaunch() async {
         await inputWriter?.closeInput()
+        standardOutputDrainTask?.cancel()
+        standardOutputDrainTask = nil
         standardOutput?.readabilityHandler = nil
         standardError?.readabilityHandler = nil
         try? standardOutput?.close()

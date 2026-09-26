@@ -29,6 +29,8 @@ for architecture in "${architectures[@]}"; do
 done
 
 app_path="$PWD/dist/Usage Island.app"
+# Start from an empty bundle so files from an earlier build never ship.
+rm -rf "$app_path"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 if [[ "${#binaries[@]}" -gt 1 ]]; then
     lipo -create "${binaries[@]}" -output "$app_path/Contents/MacOS/UsageIslandPrototype"

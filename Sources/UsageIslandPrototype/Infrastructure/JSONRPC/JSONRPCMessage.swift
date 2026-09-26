@@ -126,10 +126,21 @@ struct JSONRPCNotificationMessage: Encodable {
     let params: JSONValue?
 }
 
+struct JSONRPCErrorResponseMessage: Encodable {
+    struct Body: Encodable {
+        let code: Int
+        let message: String
+    }
+
+    let id: JSONRPCRequestID
+    let error: Body
+}
+
 enum JSONRPCIncomingMessage: Sendable {
     case success(id: JSONRPCRequestID, result: JSONValue)
     case failure(id: JSONRPCRequestID, code: Int)
     case notification(JSONRPCNotification)
+    case request(id: JSONRPCRequestID)
 }
 
 enum JSONRPCMessageCodec {
@@ -143,6 +154,21 @@ enum JSONRPCMessageCodec {
 
     static func encodeNotification(method: String, params: JSONValue?) throws -> Data {
         try encode(JSONRPCNotificationMessage(method: method, params: params))
+    }
+
+    static let methodNotFoundCode = -32601
+
+    static func encodeErrorResponse(
+        id: JSONRPCRequestID,
+        code: Int,
+        message: String
+    ) throws -> Data {
+        try encode(
+            JSONRPCErrorResponseMessage(
+                id: id,
+                error: .init(code: code, message: message)
+            )
+        )
     }
 
     static func decodeIncoming(_ data: Data) throws -> JSONRPCIncomingMessage {
@@ -191,12 +217,11 @@ private struct IncomingEnvelope: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if container.contains(.method) {
-            guard !container.contains(.id) else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .id,
-                    in: container,
-                    debugDescription: "Server requests are not supported"
-                )
+            _ = try container.decode(String.self, forKey: .method)
+            if container.contains(.id) {
+                let id = try container.decode(JSONRPCRequestID.self, forKey: .id)
+                message = .request(id: id)
+                return
             }
             let method = try container.decode(String.self, forKey: .method)
             let params = try container.decodeIfPresent(JSONValue.self, forKey: .params)

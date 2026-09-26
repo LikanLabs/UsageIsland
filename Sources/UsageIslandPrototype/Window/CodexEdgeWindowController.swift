@@ -19,6 +19,7 @@ final class CodexEdgeWindowController {
     private var visibility = DockVisibilityState()
     private var visibilityTimer: AnyCancellable?
     private var menuOpen = false
+    private var screensAsleep = false
     private var animationID = 0
 
     init(model: AppModel, preferences: AppPreferences = .shared) {
@@ -67,6 +68,7 @@ final class CodexEdgeWindowController {
         for (notification, tracking) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
             NotificationCenter.default.publisher(for: notification).receive(on: RunLoop.main).sink { [weak self] _ in
                 self?.menuOpen = tracking
+                self?.updateVisibilityTimer()
                 self?.pollVisibility()
             }.store(in: &subscriptions)
         }
@@ -88,6 +90,14 @@ final class CodexEdgeWindowController {
                 self?.closeIfOutside(event)
             }
             return event
+        }
+        for (notification, asleep) in [(NSWorkspace.screensDidSleepNotification, true), (NSWorkspace.screensDidWakeNotification, false)] {
+            NSWorkspace.shared.notificationCenter.publisher(for: notification)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in
+                    self?.screensAsleep = asleep
+                    self?.updateVisibilityTimer()
+                }.store(in: &subscriptions)
         }
         for event in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: event)
@@ -119,6 +129,10 @@ final class CodexEdgeWindowController {
             notchFrame: notch.hasHardwareNotch ? notch.notchFrame : nil,
             detailHeight: CodexEdgeLayout.envelopeHeight(snapshot: model.providers.first { $0.id == .codex })
         )
+        // Periodic usage refreshes also land here; only re-run the indicator
+        // animation when its frame moved or it is missing from the screen.
+        let needsIndicatorLayout = self.geometry?.tab != geometry.tab
+            || (visibility.isVisible && tab?.isVisible != true)
         self.geometry = geometry
         displayScale.value = geometry.scale
         displayScale.topWidth = geometry.tab.width / geometry.scale
@@ -127,7 +141,9 @@ final class CodexEdgeWindowController {
         detail?.setFrame(geometry.detail, display: true)
         if model.isPulseOpen { detail?.orderFrontRegardless() }
 
-        setIndicatorVisible(visibility.isVisible, force: true)
+        if needsIndicatorLayout {
+            setIndicatorVisible(visibility.isVisible, force: true)
+        }
         pollVisibility()
     }
 
@@ -138,6 +154,10 @@ final class CodexEdgeWindowController {
     private func pinDetails() {
         setIndicatorVisible(true)
         isPinned = true
+        // Record the pinned state before polling pauses, so closing later
+        // starts from "visible" and keeps the normal hide delay.
+        pollVisibility()
+        updateVisibilityTimer()
         model.isPulseOpen = true
         detail?.makeKeyAndOrderFront(nil)
         if model.connectionStates[.codex] != .connecting {
@@ -159,13 +179,20 @@ final class CodexEdgeWindowController {
     }
 
     private func configureAutoHide() {
-        visibilityTimer = nil
-        if preferences.autoHide {
-            visibilityTimer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect().sink { [weak self] _ in
+        updateVisibilityTimer()
+        pollVisibility()
+    }
+
+    /// Poll the pointer only while auto-hide can actually change visibility:
+    /// pinned details, open menus and sleeping displays keep the tab as is.
+    private func updateVisibilityTimer() {
+        let needsPolling = preferences.autoHide && !isPinned && !menuOpen && !screensAsleep
+        guard needsPolling != (visibilityTimer != nil) else { return }
+        visibilityTimer = needsPolling
+            ? Timer.publish(every: 0.1, on: .main, in: .common).autoconnect().sink { [weak self] _ in
                 self?.pollVisibility()
             }
-        }
-        pollVisibility()
+            : nil
     }
 
     private func pollVisibility() {
@@ -232,6 +259,7 @@ final class CodexEdgeWindowController {
         let token = withTransaction(transaction) { navigation.beginPresentation(open) }
         if !open {
             isPinned = false
+            updateVisibilityTimer()
             detail.ignoresMouseEvents = true
         }
         if open {

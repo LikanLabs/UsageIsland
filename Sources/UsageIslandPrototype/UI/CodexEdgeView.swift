@@ -99,14 +99,22 @@ struct CodexEdgeView: View {
         }
     }
 
+    /// Usage shown in the pill. A stale reading whose window already reset
+    /// describes the previous window, so it is withheld instead of shown.
+    private var headlineUsed: Int? {
+        guard let snapshot else { return nil }
+        if snapshot.freshness == .stale, snapshot.preferredWindow.hasReset(at: Date()) { return nil }
+        return snapshot.preferredWindow.usedPercent
+    }
+
     private var percentage: some View {
-        Text(snapshot.map { "\(displayPercent($0.preferredWindow.usedPercent))%" } ?? "—").monospacedDigit()
+        Text(headlineUsed.map { "\(displayPercent($0))%" } ?? "—").monospacedDigit()
     }
 
     @ViewBuilder
     private func logoRing(size: CGFloat) -> some View {
         ZStack {
-            UsageRing(used: snapshot?.preferredWindow.usedPercent,
+            UsageRing(used: headlineUsed,
                       showsConsumed: preferences.showsConsumedPercent,
                       stale: snapshot?.freshness == .stale)
             CodexMark().fill(.white.opacity(0.92)).frame(width: size * 0.52, height: size * 0.52)
@@ -115,8 +123,9 @@ struct CodexEdgeView: View {
 
     private var accessibilitySummary: String {
         let prefix = preferences.text("Codex usage, ", "Consumo de Codex, ")
-        guard let snapshot else { return prefix + preferences.text("unavailable", "no disponible") }
-        let amount = "\(displayPercent(snapshot.preferredWindow.usedPercent))% " + percentLabel
+        guard snapshot != nil else { return prefix + preferences.text("unavailable", "no disponible") }
+        guard let used = headlineUsed else { return prefix + preferences.text("reset pending", "reinicio pendiente") }
+        let amount = "\(displayPercent(used))% " + percentLabel
         return prefix + amount + ", " + periodLabel
     }
 
@@ -296,31 +305,54 @@ struct CodexUsageDetailView: View {
     }
 
     private func usageRow(_ window: UsageWindow, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // A stale window past its reset no longer describes current usage.
+        let outdated = snapshot?.freshness == .stale && window.hasReset(at: now)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(window.durationMinutes == 300 ? preferences.text("Session", "Sesión") : window.durationMinutes == 10_080 ? preferences.text("This week", "Esta semana") : "\(window.durationMinutes) min")
+                Text(CodexEdgeText.windowTitle(window.durationMinutes, preferences: preferences))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(DockStyle.muted)
                 Spacer()
-                Text("\(preferences.showsConsumedPercent ? window.usedPercent : 100 - window.usedPercent)%")
+                Text(outdated ? "—" : "\(preferences.showsConsumedPercent ? window.usedPercent : 100 - window.usedPercent)%")
                     .font(.system(size: 27, weight: .light, design: .rounded)).monospacedDigit()
             }
             GeometryReader { proxy in
                 Capsule().fill(.white.opacity(0.14))
                     .overlay(alignment: .leading) {
                         Capsule().fill(DockStyle.tint(window.usedPercent))
-                            .frame(width: proxy.size.width * CGFloat(preferences.showsConsumedPercent ? window.usedPercent : window.remainingPercent) / 100)
+                            .frame(width: outdated ? 0 : proxy.size.width * CGFloat(preferences.showsConsumedPercent ? window.usedPercent : window.remainingPercent) / 100)
                     }
             }.frame(height: 4).accessibilityHidden(true)
-            Text(resetLabel(window.resetsAt, now: now)).font(.system(size: 10)).foregroundStyle(DockStyle.muted)
+            Text(CodexEdgeText.resetLabel(window.resetsAt, now: now, preferences: preferences)).font(.system(size: 10)).foregroundStyle(DockStyle.muted)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Presentation strings for already-normalized usage windows.
+@MainActor
+enum CodexEdgeText {
+    static func windowTitle(_ durationMinutes: Int, preferences: AppPreferences) -> String {
+        switch durationMinutes {
+        case 300: return preferences.text("Session", "Sesión")
+        case 10_080: return preferences.text("This week", "Esta semana")
+        case let minutes where minutes % 1_440 == 0:
+            let days = minutes / 1_440
+            return preferences.text(days == 1 ? "1 day" : "\(days) days", days == 1 ? "1 día" : "\(days) días")
+        case let minutes where minutes % 60 == 0:
+            return "\(minutes / 60) h"
+        default:
+            return "\(durationMinutes) min"
         }
     }
 
-    private func resetLabel(_ date: Date?, now: Date) -> String {
+    static func resetLabel(_ date: Date?, now: Date, preferences: AppPreferences) -> String {
         guard let date else { return preferences.text("Reset unavailable", "Reinicio no disponible") }
         let minutes = Int(ceil(date.timeIntervalSince(now) / 60))
         if minutes <= 0 { return preferences.text("Reset pending", "Reinicio pendiente") }
         if minutes < 60 { return preferences.text("Resets in \(minutes) min", "Reinicia en \(minutes) min") }
         if minutes < 1_440 { return preferences.text("Resets in \(minutes / 60)h \(minutes % 60)m", "Reinicia en \(minutes / 60)h \(minutes % 60)m") }
-        return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).hour().minute().locale(preferences.locale))
+        // Include the day of the month: a bare weekday a week away reads like
+        // a time earlier today.
+        return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
     }
 }

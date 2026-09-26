@@ -144,7 +144,11 @@ struct CodexRateLimitWindow: Sendable {
         guard number.isFinite else {
             throw CodexUsageError.invalidRateLimitResponse
         }
-        let rounded = number.rounded(.toNearestOrAwayFromZero)
+        // Never round usage up to 100 while some quota remains, or the UI
+        // would report "0% available" before the limit is actually reached.
+        let rounded = number > 99 && number < 100
+            ? 99
+            : number.rounded(.toNearestOrAwayFromZero)
         let intLowerBound = Double(Int.min)
         let intUpperBoundExclusive = -intLowerBound
         guard rounded >= intLowerBound,

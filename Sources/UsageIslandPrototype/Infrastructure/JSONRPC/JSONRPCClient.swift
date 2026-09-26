@@ -43,6 +43,7 @@ public actor JSONRPCClient {
     private var notificationSendErrors: [UInt64: JSONRPCError] = [:]
     private var sendQuiescenceWaiters: [CheckedContinuation<Void, Never>] = []
     private var quiescenceWaiters: [CheckedContinuation<Void, Never>] = []
+    private var pendingServerReplies = 0
     private var receiveBuffer = Data()
     private var readerTask: Task<Void, Never>?
     private var transportShutdownTask:
@@ -272,6 +273,21 @@ public actor JSONRPCClient {
         method: String,
         params: JSONValue? = nil
     ) async throws {
+        guard case .running = state else {
+            throw state == .idle
+                ? JSONRPCError.notInitialized
+                : JSONRPCError.transportClosed
+        }
+        let data = try JSONRPCMessageCodec.encodeNotification(
+            method: method,
+            params: params
+        )
+        try await sendOneWay(data)
+    }
+
+    /// Sends a message that expects no response, such as a notification or a
+    /// reply to a server-initiated request.
+    private func sendOneWay(_ data: Data) async throws {
         guard case .running(let generation) = state else {
             throw state == .idle
                 ? JSONRPCError.notInitialized
@@ -285,11 +301,6 @@ public actor JSONRPCClient {
                 limit: maximumPendingRequests
             )
         }
-
-        let data = try JSONRPCMessageCodec.encodeNotification(
-            method: method,
-            params: params
-        )
         guard data.count <= maximumRequestSize else {
             throw JSONRPCError.requestTooLarge(limit: maximumRequestSize)
         }
@@ -534,9 +545,12 @@ public actor JSONRPCClient {
         }
 
         receiveBuffer.append(chunk)
-        while let newline = receiveBuffer.firstIndex(of: 0x0A) {
+        // Advance a cursor and compact once per chunk; removing each line from
+        // the front of the buffer would copy the remainder every time.
+        var lineStart = receiveBuffer.startIndex
+        while let newline = receiveBuffer[lineStart...].firstIndex(of: 0x0A) {
             let rawLineSize = receiveBuffer.distance(
-                from: receiveBuffer.startIndex,
+                from: lineStart,
                 to: newline
             )
             let hasCarriageReturn = rawLineSize > 0
@@ -547,8 +561,8 @@ public actor JSONRPCClient {
                 throw JSONRPCError.responseTooLarge(limit: maximumLineSize)
             }
 
-            var line = Data(receiveBuffer[..<newline])
-            receiveBuffer.removeSubrange(receiveBuffer.startIndex...newline)
+            var line = Data(receiveBuffer[lineStart..<newline])
+            lineStart = receiveBuffer.index(after: newline)
             if line.last == 0x0D {
                 line.removeLast()
             }
@@ -559,8 +573,12 @@ public actor JSONRPCClient {
                     receiveBuffer.removeAll(keepingCapacity: false)
                     throw error
                 }
+                guard case .running = state else {
+                    return
+                }
             }
         }
+        receiveBuffer.removeSubrange(receiveBuffer.startIndex..<lineStart)
 
         guard lineSizeExcludingOptionalCarriageReturn(receiveBuffer)
             <= maximumLineSize else {
@@ -584,12 +602,37 @@ public actor JSONRPCClient {
                 throw JSONRPCError.transportClosed
             }
 
+        case .request(let id):
+            // This client never handles server-initiated requests, so answer
+            // each one with "method not found" instead of leaving the server
+            // waiting or tearing down the session.
+            guard pendingServerReplies < maximumPendingRequests else {
+                throw JSONRPCError.notificationSendLimitExceeded(
+                    limit: maximumPendingRequests
+                )
+            }
+            pendingServerReplies += 1
+            let reply = try JSONRPCMessageCodec.encodeErrorResponse(
+                id: id,
+                code: JSONRPCMessageCodec.methodNotFoundCode,
+                message: "Method not found"
+            )
+            Task { [weak self] in
+                await self?.sendServerReply(reply)
+            }
+
         case .success(let id, let result):
             try receive(.success(result), for: id)
 
         case .failure(let id, let code):
             try receive(.failure(code: code), for: id)
         }
+    }
+
+    private func sendServerReply(_ data: Data) async {
+        defer { pendingServerReplies -= 1 }
+        // A failed send already closes the client fail-closed.
+        try? await sendOneWay(data)
     }
 
     private func readerEnded(

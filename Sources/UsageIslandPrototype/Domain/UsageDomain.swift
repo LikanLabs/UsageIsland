@@ -57,6 +57,13 @@ public struct UsageWindow: Equatable, Sendable {
         Self.clamp(100 - usedPercent)
     }
 
+    /// True once the window's reset time has passed, meaning this reading
+    /// describes a previous window and no longer reflects current usage.
+    public func hasReset(at now: Date) -> Bool {
+        guard let resetsAt else { return false }
+        return resetsAt <= now
+    }
+
     public init(
         durationMinutes: Int,
         usedPercent: Int,

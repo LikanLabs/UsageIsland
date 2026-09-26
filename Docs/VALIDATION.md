@@ -1,3 +1,33 @@
+# Validation — 2026-09-26 (review fixes)
+
+Toolchain: Xcode with Apple Swift 6.4. Earlier entries below are historical;
+their XCTest limitation no longer applies.
+
+## Passed
+
+- `swift test`: 231 tests, 0 failures, no compiler warnings. The process and
+  JSON-RPC suites passed five consecutive runs.
+- `./Scripts/verify-resilience.sh`: every scenario passes, including 768 geometry
+  cases and 30 adaptive-notch cases. The script now selects the native build
+  system on toolchains that default to swiftbuild.
+- `./Scripts/package-app.sh`: release build, Info.plist lint and ad hoc signature.
+- Regression tests added for each fix:
+  - stdin backpressure resumes after `EAGAIN` (aborted with "Incorrect actor
+    executor assumption" before the fix);
+  - server-initiated JSON-RPC requests get a `-32601` reply and the session stays up;
+  - a child exit is reported when a descendant keeps stdout open;
+  - the Codex provider is replaced when the executable moves, and never relaunches
+    after shutdown;
+  - usage between 99 and 100 % rounds to 99 so quota is never shown as exhausted early;
+  - reset labels, window titles, date locale and past-reset detection.
+
+## Not verified
+
+- The release workflow's signing and notarization steps have not run: they need
+  Developer ID and App Store Connect secrets.
+- Pausing the auto-hide timer (pinned details, open menus, sleeping displays) and
+  skipping redundant tab animations were not exercised in a physical UI session.
+
 # Validation — 2026-09-05
 
 ## Passed
@@ -160,10 +190,8 @@ do not prove the whole desktop composition is perfect.
 
 ## Complete public-release verification
 
-1. Run `swift test` with full Xcode selected.
-2. Physically check sleep/wake, screen unplug/replug, clamshell, and fullscreen on
+1. Physically check sleep/wake, screen unplug/replug, clamshell, and fullscreen on
    target hardware, preserving the current design.
-3. Install a Developer ID Application identity with its private key and configure
-   a notarytool Keychain profile.
-4. Follow the public-distribution commands in README.md. Distribute only after
+2. Configure the signing and notarization secrets listed in README.md.
+3. Follow the public-distribution commands in README.md. Distribute only after
    notarization acceptance, staple validation, and Gatekeeper assessment succeed.

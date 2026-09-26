@@ -7,5 +7,9 @@ cask "usage-island" do
   desc "Codex usage monitor for the macOS menu bar and screen edge"
   homepage "https://github.com/LikanLabs/UsageIsland"
 
+  depends_on macos: ">= :sonoma"
+
   app "Usage Island.app"
+
+  zap trash: "~/Library/Preferences/com.likanlabs.usageisland.plist"
 end

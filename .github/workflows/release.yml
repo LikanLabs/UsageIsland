@@ -2,26 +2,72 @@ name: Release
 
 on:
   push:
-    tags: ['v*.*.*']
+    # Only plain major.minor.patch tags; package-app.sh rejects anything else.
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  verify:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Test
         run: swift test
       - name: Run resilience checks
         run: ./Scripts/verify-resilience.sh
+
+  release:
+    needs: verify
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      # Optional. Without these secrets the app is signed ad hoc, as before.
+      DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+      DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      DEVELOPER_ID_IDENTITY: ${{ secrets.DEVELOPER_ID_IDENTITY }}
+      NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+      NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+      NOTARY_API_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Import Developer ID certificate
+        if: env.DEVELOPER_ID_CERTIFICATE_P12 != ''
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          echo "USAGE_ISLAND_SIGNING_IDENTITY=$DEVELOPER_ID_IDENTITY" >> "$GITHUB_ENV"
       - name: Build universal app
         env:
           USAGE_ISLAND_ARCHS: arm64,x86_64
           USAGE_ISLAND_VERSION: ${{ github.ref_name }}
         run: |
           USAGE_ISLAND_VERSION="${USAGE_ISLAND_VERSION#v}" ./Scripts/package-app.sh
+      - name: Notarize
+        if: env.DEVELOPER_ID_CERTIFICATE_P12 != '' && env.NOTARY_API_KEY_P8 != ''
+        run: |
+          key_path="$RUNNER_TEMP/notary-key.p8"
+          printf '%s' "$NOTARY_API_KEY_P8" > "$key_path"
+          USAGE_ISLAND_NOTARY_KEY_PATH="$key_path" \
+          USAGE_ISLAND_NOTARY_KEY_ID="$NOTARY_API_KEY_ID" \
+          USAGE_ISLAND_NOTARY_ISSUER="$NOTARY_API_ISSUER" \
+            ./Scripts/notarize-app.sh
+          rm -f "$key_path"
       - name: Package release
         run: |
           ditto -c -k --keepParent "dist/Usage Island.app" "dist/Usage-Island.zip"
@@ -30,8 +76,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            dist/Usage-Island.zip \
-            dist/Usage-Island.zip.sha256 \
-            --title "Usage Island ${GITHUB_REF_NAME}" \
-            --generate-notes
+          # Re-running a tag replaces the assets instead of failing.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              dist/Usage-Island.zip \
+              dist/Usage-Island.zip.sha256 \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              dist/Usage-Island.zip \
+              dist/Usage-Island.zip.sha256 \
+              --title "Usage Island ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
+      - name: Remove signing keychain
+        if: always() && env.DEVELOPER_ID_CERTIFICATE_P12 != ''
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
