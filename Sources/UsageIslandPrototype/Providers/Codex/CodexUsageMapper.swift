@@ -48,8 +48,23 @@ enum CodexUsageMapper {
         } ?? windows.startIndex
 
         let preferredWindow = windows[preferredIndex]
-        let additionalWindows = windows.enumerated().compactMap { index, window in
+        var additionalWindows = windows.enumerated().compactMap { index, window in
             index == preferredIndex ? nil : window
+        }
+        // Separate named buckets appear after the main windows, labelled by
+        // the backend's own name; a bad bucket never hides the main limits.
+        for bucket in response.additionalBuckets {
+            var seen = Set<Int>()
+            for window in bucket.windows where seen.insert(window.durationMinutes).inserted {
+                if let scoped = try? UsageWindow(
+                    durationMinutes: window.durationMinutes,
+                    usedPercent: window.usedPercent,
+                    resetsAt: window.resetsAt,
+                    scope: bucket.name
+                ) {
+                    additionalWindows.append(scoped)
+                }
+            }
         }
 
         do {

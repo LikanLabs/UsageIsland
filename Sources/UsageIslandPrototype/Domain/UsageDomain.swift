@@ -38,6 +38,24 @@ public enum DataFreshness: Equatable, Sendable {
     case unavailable
 }
 
+/// Why a provider has no usage to show, in terms the user can act on.
+public enum ProviderIssue: Equatable, Sendable {
+    /// The provider's CLI is not installed.
+    case notInstalled
+    /// The CLI is installed but not signed in to a subscription.
+    case notSignedIn
+    /// Signed in, but the account has no plan limits (for example an API
+    /// key or usage-based billing).
+    case noPlanLimits
+    /// Anything else, usually temporary.
+    case unavailable
+}
+
+/// Adopted by provider errors that know which `ProviderIssue` they mean.
+public protocol ProviderIssueReporting: Error {
+    var issue: ProviderIssue { get }
+}
+
 public enum ProviderConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
@@ -56,10 +74,16 @@ public enum UsageDomainError: Error, Equatable, Sendable {
     case duplicateWindowDuration(Int)
 }
 
-public struct UsageWindow: Equatable, Sendable {
+public struct UsageWindow: Equatable, Sendable, Identifiable {
     public let durationMinutes: Int
     public let usedPercent: Int
     public let resetsAt: Date?
+    /// Set for a limit that applies to only part of the plan, as named by the
+    /// provider (for example a single model's weekly limit); nil for the
+    /// plan-wide window of that duration.
+    public let scope: String?
+
+    public var id: String { "\(durationMinutes)|\(scope ?? "")" }
 
     public var remainingPercent: Int {
         Self.clamp(100 - usedPercent)
@@ -75,7 +99,8 @@ public struct UsageWindow: Equatable, Sendable {
     public init(
         durationMinutes: Int,
         usedPercent: Int,
-        resetsAt: Date?
+        resetsAt: Date?,
+        scope: String? = nil
     ) throws {
         guard durationMinutes > 0 else {
             throw UsageDomainError.invalidWindowDuration(durationMinutes)
@@ -83,7 +108,8 @@ public struct UsageWindow: Equatable, Sendable {
         self.init(
             validatedDurationMinutes: durationMinutes,
             usedPercent: usedPercent,
-            resetsAt: resetsAt
+            resetsAt: resetsAt,
+            scope: scope
         )
     }
 
@@ -107,11 +133,13 @@ public struct UsageWindow: Equatable, Sendable {
     init(
         validatedDurationMinutes durationMinutes: Int,
         usedPercent: Int,
-        resetsAt: Date?
+        resetsAt: Date?,
+        scope: String? = nil
     ) {
         self.durationMinutes = durationMinutes
         self.usedPercent = Self.clamp(usedPercent)
         self.resetsAt = resetsAt
+        self.scope = scope
     }
 
     init(
@@ -150,7 +178,7 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     }
 
     public var weeklyWindow: UsageWindow? {
-        windows.first { $0.durationMinutes == 10_080 }
+        windows.first { $0.durationMinutes == 10_080 && $0.scope == nil }
     }
 
     public var weeklyUsedPercent: Int? {
@@ -189,9 +217,9 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
         isActivelyUsed: Bool,
         capturedAt: Date
     ) throws {
-        var durations = Set<Int>()
+        var windowIDs = Set<String>()
         for window in [preferredWindow] + additionalWindows {
-            guard durations.insert(window.durationMinutes).inserted else {
+            guard windowIDs.insert(window.id).inserted else {
                 throw UsageDomainError.duplicateWindowDuration(
                     window.durationMinutes
                 )

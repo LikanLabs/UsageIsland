@@ -212,10 +212,18 @@ struct CodexRateLimitWindow: Sendable {
 struct CodexRateLimitSnapshot: Sendable {
     let windows: [CodexRateLimitWindow]
     let planType: CodexPlanType?
+    /// Backend display name for a separate limit bucket, when supplied.
+    let limitName: String?
 
     init(validating value: JSONValue) throws {
         guard case .object(let object) = value else {
             throw CodexUsageError.invalidRateLimitResponse
+        }
+        if case .string(let name) = object["limitName"] {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            limitName = trimmed.isEmpty ? nil : String(trimmed.prefix(24))
+        } else {
+            limitName = nil
         }
 
         switch object["planType"] {
@@ -242,12 +250,16 @@ struct CodexRateLimitSnapshot: Sendable {
 
 struct CodexRateLimitsResponse: Sendable {
     private let selectedSnapshot: CodexRateLimitSnapshot
+    /// Other named buckets (for example a separate limit for some models),
+    /// ordered by bucket id. Malformed or unnamed buckets are skipped.
+    let additionalBuckets: [(name: String, windows: [CodexRateLimitWindow])]
 
     init(validating value: JSONValue) throws {
         guard case .object(let object) = value else {
             throw CodexUsageError.invalidRateLimitResponse
         }
 
+        additionalBuckets = Self.namedBuckets(object["rateLimitsByLimitId"])
         if let bucketsValue = object["rateLimitsByLimitId"],
            bucketsValue != .null {
             guard case .object(let buckets) = bucketsValue else {
@@ -276,6 +288,19 @@ struct CodexRateLimitsResponse: Sendable {
 
     var windows: [CodexRateLimitWindow] {
         selectedSnapshot.windows
+    }
+
+    private static func namedBuckets(_ value: JSONValue?) -> [(name: String, windows: [CodexRateLimitWindow])] {
+        guard case .object(let buckets) = value else { return [] }
+        var names = Set<String>()
+        var result: [(name: String, windows: [CodexRateLimitWindow])] = []
+        for key in buckets.keys.sorted() where key != "codex" {
+            guard let bucket = try? CodexRateLimitSnapshot(validating: buckets[key] ?? .null),
+                  let name = bucket.limitName, !bucket.windows.isEmpty,
+                  names.insert(name).inserted else { continue }
+            result.append((name, bucket.windows))
+        }
+        return result
     }
 
     var planType: CodexPlanType? {

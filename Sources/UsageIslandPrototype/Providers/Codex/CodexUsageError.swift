@@ -30,6 +30,21 @@ enum CodexUsageError: Error, Equatable, Sendable {
     case stopped
 }
 
+extension CodexUsageError: ProviderIssueReporting {
+    var issue: ProviderIssue {
+        switch self {
+        case .notAuthenticated, .unsupportedAccountMode(.noAccount):
+            .notSignedIn
+        case .unsupportedAccountMode, .rateLimitsUnavailable:
+            .noPlanLimits
+        case .appServerFailure(.executableUnavailable):
+            .notInstalled
+        default:
+            .unavailable
+        }
+    }
+}
+
 extension CodexUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {

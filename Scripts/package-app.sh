@@ -38,6 +38,7 @@ else
     cp "${binaries[0]}" "$app_path/Contents/MacOS/UsageIslandPrototype"
 fi
 cp Assets/OpenAI/LICENSE.md "$app_path/Contents/Resources/OpenAI-SimpleIcons-LICENSE.md"
+cp Assets/Claude/LICENSE.md "$app_path/Contents/Resources/Claude-SimpleIcons-LICENSE.md"
 cat > "$app_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -88,7 +88,7 @@ final class ClaudeUsageProviderTests: XCTestCase {
     func testMissingOrInvalidRecordsFailWithoutInventingUsage() async throws {
         let directory = try temporaryDirectory()
         let missing = ClaudeUsageProvider(recordURL: directory.appendingPathComponent("none.json"), clock: FixedClaudeClock(now))
-        await assertThrows(ClaudeUsageError.notConnected) { try await missing.fetchUsage() }
+        await assertThrows(ClaudeUsageError.cliNotFound) { try await missing.fetchUsage() }
 
         let bad = directory.appendingPathComponent("bad.json")
         try Data(#"{"version":2,"capturedAt":1,"fiveHour":null,"sevenDay":null}"#.utf8).write(to: bad)
@@ -344,13 +344,42 @@ private func usageOutput(five: Double, week: Double, requestID: String = "usage-
     """.utf8)
 }
 
+/// Synthetic rows in the CLI's `limits` shape, with an unknown kind and a
+/// malformed row that must be skipped.
+private let scopedUsageOutput = Data("""
+{"type":"control_response","response":{"subtype":"success","request_id":"usage-island","response":{"rate_limits_available":true,"rate_limits":{"five_hour":null,"seven_day":null,"limits":[{"kind":"session","group":"session","percent":12,"resets_at":"2023-11-14T23:13:20+00:00","scope":null},{"kind":"weekly_all","group":"weekly","percent":5,"resets_at":"2023-11-20T11:46:40+00:00","scope":null},{"kind":"weekly_scoped","group":"weekly","percent":40,"resets_at":"2023-11-20T11:46:40+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}},{"kind":"future_kind","percent":3},{"kind":42}]}}}}
+""".utf8)
+
 final class ClaudeUsageResponseParserTests: XCTestCase {
-    func testParsesPlanLimitsFromControlResponse() throws {
+    func testParsesLegacyWindowsWhenLimitRowsAreAbsent() throws {
         let limits = try ClaudeUsageResponseParser.limits(from: usageOutput(five: 27, week: 4.5))
-        XCTAssertEqual(limits.fiveHour?.usedPercentage, 27)
-        XCTAssertEqual(limits.fiveHour?.resetsAt.timeIntervalSince1970 ?? 0, 1_700_003_600.141, accuracy: 0.01)
-        XCTAssertEqual(limits.sevenDay?.usedPercentage, 4.5)
-        XCTAssertEqual(limits.sevenDay?.resetsAt, Date(timeIntervalSince1970: 1_700_480_800))
+        XCTAssertEqual(limits.windows.map(\.durationMinutes), [300, 10_080])
+        XCTAssertEqual(limits.windows[0].usedPercentage, 27)
+        XCTAssertEqual(limits.windows[0].resetsAt?.timeIntervalSince1970 ?? 0, 1_700_003_600.141, accuracy: 0.01)
+        XCTAssertEqual(limits.windows[1].usedPercentage, 4.5)
+        XCTAssertEqual(limits.windows[1].resetsAt, Date(timeIntervalSince1970: 1_700_480_800))
+        XCTAssertEqual(limits.windows.map(\.scope), [nil, nil])
+    }
+
+    func testOrderedLimitRowsIncludePerModelWeeklyLimits() throws {
+        let limits = try ClaudeUsageResponseParser.limits(from: scopedUsageOutput)
+        XCTAssertEqual(limits.windows.map(\.durationMinutes), [300, 10_080, 10_080])
+        XCTAssertEqual(limits.windows.map(\.scope), [nil, nil, "Fable"])
+        XCTAssertEqual(limits.windows.map(\.usedPercentage), [12, 5, 40])
+        XCTAssertNotNil(limits.windows[2].resetsAt)
+    }
+
+    func testScopedLimitBecomesItsOwnWindow() async throws {
+        let query = ScriptedUsageQuery(output: scopedUsageOutput)
+        let provider = ClaudeUsageProvider(
+            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
+            clock: FixedClaudeClock(Date(timeIntervalSince1970: 1_700_000_000)),
+            makeQuery: { query }
+        )
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.preferredWindow.durationMinutes, 300)
+        XCTAssertEqual(snapshot.windows.map(\.id), ["300|", "10080|", "10080|Fable"])
+        XCTAssertEqual(snapshot.weeklyWindow?.usedPercent, 5, "plan-wide week, not the model one")
     }
 
     func testRejectsMissingForeignAndUnavailableResponses() {
@@ -440,7 +469,7 @@ final class ClaudeCombinedSourceTests: XCTestCase {
         let url = try temporaryDirectory().appendingPathComponent("record.json")
         let query = ScriptedUsageQuery(output: Data("garbage".utf8))
         let provider = ClaudeUsageProvider(recordURL: url, clock: FixedClaudeClock(now), makeQuery: { query })
-        await assertThrows(ClaudeUsageError.notConnected) { _ = try await provider.fetchUsage() }
+        await assertThrows(ClaudeUsageError.queryFailed) { _ = try await provider.fetchUsage() }
 
         ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
         let snapshot = try await provider.fetchUsage()
@@ -483,5 +512,47 @@ private actor ScriptedUsageQuery: ClaudeUsageQuerying {
     func queryUsage() async throws -> Data {
         calls += 1
         return output
+    }
+}
+
+final class ProviderIssueTests: XCTestCase {
+    func testClaudeReportsWhyThereIsNoReading() async throws {
+        let directory = try temporaryDirectory()
+        let apiKey = ScriptedUsageQuery(output: Data(#"{"type":"control_response","response":{"subtype":"success","request_id":"usage-island","response":{"rate_limits_available":false,"rate_limits":null}}}"#.utf8))
+        let provider = ClaudeUsageProvider(
+            recordURL: directory.appendingPathComponent("none.json"),
+            clock: FixedClaudeClock(Date(timeIntervalSince1970: 1_700_000_000)),
+            makeQuery: { apiKey }
+        )
+        await assertThrows(ClaudeUsageError.noPlanLimits) { _ = try await provider.fetchUsage() }
+        XCTAssertEqual(ClaudeUsageError.noPlanLimits.issue, .noPlanLimits)
+        XCTAssertEqual(ClaudeUsageError.cliNotFound.issue, .notInstalled)
+        XCTAssertEqual(ClaudeUsageError.queryFailed.issue, .notSignedIn)
+    }
+
+    func testCodexErrorsMapToIssues() {
+        XCTAssertEqual(CodexUsageError.notAuthenticated.issue, .notSignedIn)
+        XCTAssertEqual(CodexUsageError.unsupportedAccountMode(.apiKey).issue, .noPlanLimits)
+        XCTAssertEqual(CodexUsageError.unsupportedAccountMode(.amazonBedrock).issue, .noPlanLimits)
+        XCTAssertEqual(CodexUsageError.rateLimitsUnavailable.issue, .noPlanLimits)
+        XCTAssertEqual(CodexUsageError.appServerFailure(.executableUnavailable).issue, .notInstalled)
+        XCTAssertEqual(CodexUsageError.appServerFailure(.timeout).issue, .unavailable)
+    }
+
+    @MainActor
+    func testModelPublishesIssuesAndClearsThemOnSuccess() async throws {
+        let codex = ScriptedUsageProvider(id: .codex)
+        let model = try AppModel(providerAdapters: [codex], clock: FixedClaudeClock(Date(timeIntervalSince1970: 1_700_000_000)), initialSnapshots: [])
+        await model.refreshUsage()
+        XCTAssertEqual(model.issues[.codex], .unavailable)
+
+        await codex.set(try UsageSnapshot(
+            provider: .codex,
+            preferredWindow: UsageWindow(durationMinutes: 10_080, usedPercent: 3, resetsAt: nil),
+            additionalWindows: [], weeklySpend: nil, freshness: .fresh, isActivelyUsed: false,
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        await model.refreshUsage()
+        XCTAssertNil(model.issues[.codex])
     }
 }

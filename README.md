@@ -12,9 +12,10 @@ Usage Island is a small native macOS app that sits beside the MacBook notch
 (or on the left or right edge of the screen) and shows how much of your
 subscription limits you have left:
 
-- **Codex**: 5-hour session and weekly limits.
-- **Claude Code**: 5-hour session and weekly limits, the same numbers `/usage`
-  shows.
+- **Codex**: 5-hour session and weekly limits, plus any separately named
+  limit your plan has. Plans without a 5-hour limit show "No limit".
+- **Claude Code**: 5-hour session, weekly and per-model weekly limits (for
+  example "Fable week"), the same numbers `/usage` shows.
 
 The pill shows the tool you are using right now. Click it to see both tools,
 with reset times.
@@ -132,9 +133,10 @@ terminal, click **Disconnect** first, or remove the `statusLine` entry from
 
 | You see | Try |
 | --- | --- |
-| "Usage unavailable" under Codex | Run `codex` in Terminal and make sure you are signed in with ChatGPT |
-| "Claude Code not found or not signed in" | Run `claude` in Terminal and sign in with your Claude subscription |
-| No Claude numbers with an API key | Plan limits exist only for Claude subscriptions, not API keys |
+| "Codex CLI is not installed" / "Claude Code is not installed" | Install the CLI; the app finds it in the usual locations |
+| "Sign in to … in Terminal" | Run `codex` or `claude` in Terminal and sign in with your subscription |
+| "This account has no plan limits" | You are signed in with an API key or pay-as-you-go billing; plan limits exist only for subscriptions |
+| "Couldn't read usage" | Usually temporary; click refresh |
 | An old value with a dashed ring | The last refresh failed; click refresh or check your connection |
 | The app does not open | See [First launch](#first-launch) |
 

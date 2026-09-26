@@ -100,12 +100,15 @@ private final class TimeoutFlag: @unchecked Sendable {
 enum ClaudeUsageResponseParser {
     struct Limits: Equatable, Sendable {
         struct Window: Equatable, Sendable {
+            let durationMinutes: Int
+            /// Server label for a partial limit, such as a model name.
+            let scope: String?
             let usedPercentage: Double
-            let resetsAt: Date
+            let resetsAt: Date?
         }
 
-        let fiveHour: Window?
-        let sevenDay: Window?
+        /// In the server's order: session first, then the weekly limits.
+        let windows: [Window]
     }
 
     enum Failure: Error, Equatable, Sendable {
@@ -124,17 +127,45 @@ enum ClaudeUsageResponseParser {
                 throw .requestFailed
             }
             guard body.rateLimitsAvailable, let limits = body.rateLimits else { throw .limitsUnavailable }
-            let result = Limits(fiveHour: window(limits.fiveHour), sevenDay: window(limits.sevenDay))
-            guard result.fiveHour != nil || result.sevenDay != nil else { throw .limitsUnavailable }
-            return result
+            let windows = rows(limits.limits) ?? legacyWindows(limits)
+            guard !windows.isEmpty else { throw .limitsUnavailable }
+            return Limits(windows: windows)
         }
         throw .noResponse
     }
 
-    private static func window(_ window: ControlMessage.Window?) -> Limits.Window? {
-        guard let window, let used = window.utilization, used.isFinite,
-              let text = window.resetsAt, let resetsAt = date(text) else { return nil }
-        return .init(usedPercentage: used, resetsAt: resetsAt)
+    /// The server's ordered `limits` rows, classified by `kind` only. Kinds
+    /// this version does not know are skipped rather than guessed.
+    private static func rows(_ rows: [ControlMessage.Row]?) -> [Limits.Window]? {
+        guard let rows, !rows.isEmpty else { return nil }
+        var seen = Set<String>()
+        let windows: [Limits.Window] = rows.compactMap { row in
+            guard let percent = row.percent, percent.isFinite else { return nil }
+            let duration: Int
+            var scope: String?
+            switch row.kind {
+            case "session": duration = 300
+            case "weekly_all": duration = 10_080
+            case "weekly_scoped":
+                duration = 10_080
+                scope = row.scope?.model?.displayName ?? row.scope?.surface?.displayName
+                guard let name = scope?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+                scope = String(name.prefix(24))
+            default: return nil
+            }
+            guard seen.insert("\(duration)|\(scope ?? "")").inserted else { return nil }
+            return .init(durationMinutes: duration, scope: scope, usedPercentage: percent,
+                         resetsAt: row.resetsAt.flatMap(date))
+        }
+        return windows.isEmpty ? nil : windows
+    }
+
+    private static func legacyWindows(_ limits: ControlMessage.RateLimits) -> [Limits.Window] {
+        [(300, limits.fiveHour), (10_080, limits.sevenDay)].compactMap { duration, window in
+            guard let window, let used = window.utilization, used.isFinite,
+                  let text = window.resetsAt, let resetsAt = date(text) else { return nil }
+            return .init(durationMinutes: duration, scope: nil, usedPercentage: used, resetsAt: resetsAt)
+        }
     }
 
     static func date(_ text: String) -> Date? {
@@ -154,13 +185,49 @@ private struct ControlMessage: Decodable {
         }
     }
 
+    struct Named: Decodable {
+        let displayName: String?
+        enum CodingKeys: String, CodingKey { case displayName = "display_name" }
+    }
+
+    struct Scope: Decodable {
+        let model: Named?
+        let surface: Named?
+    }
+
+    struct Row: Decodable {
+        let kind: String
+        let percent: Double?
+        let resetsAt: String?
+        let scope: Scope?
+        enum CodingKeys: String, CodingKey {
+            case kind, percent, scope
+            case resetsAt = "resets_at"
+        }
+    }
+
     struct RateLimits: Decodable {
         let fiveHour: Window?
         let sevenDay: Window?
+        let limits: [Row]?
         enum CodingKeys: String, CodingKey {
             case fiveHour = "five_hour"
             case sevenDay = "seven_day"
+            case limits
         }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            fiveHour = try? container.decodeIfPresent(Window.self, forKey: .fiveHour)
+            sevenDay = try? container.decodeIfPresent(Window.self, forKey: .sevenDay)
+            // One malformed row must not hide the others.
+            limits = (try? container.decodeIfPresent([FailableRow].self, forKey: .limits))?.compactMap(\.row)
+        }
+    }
+
+    struct FailableRow: Decodable {
+        let row: Row?
+        init(from decoder: Decoder) throws { row = try? Row(from: decoder) }
     }
 
     struct Body: Decodable {

@@ -9,13 +9,58 @@ final class CodexEdgeTextTests: XCTestCase {
     func testWindowTitlesNameCommonDurations() throws {
         let preferences = try makePreferences(.english)
         XCTAssertEqual(CodexEdgeText.windowTitle(300, preferences: preferences), "Session")
-        XCTAssertEqual(CodexEdgeText.windowTitle(10_080, preferences: preferences), "This week")
+        XCTAssertEqual(CodexEdgeText.windowTitle(10_080, preferences: preferences), "Week")
         XCTAssertEqual(CodexEdgeText.windowTitle(1_440, preferences: preferences), "1 day")
         XCTAssertEqual(CodexEdgeText.windowTitle(4_320, preferences: preferences), "3 days")
         XCTAssertEqual(CodexEdgeText.windowTitle(120, preferences: preferences), "2 h")
         XCTAssertEqual(CodexEdgeText.windowTitle(45, preferences: preferences), "45 min")
         preferences.language = .spanish
         XCTAssertEqual(CodexEdgeText.windowTitle(4_320, preferences: preferences), "3 días")
+    }
+
+    func testScopedWindowsAreNamedByTheirScope() throws {
+        let preferences = try makePreferences(.english)
+        let scoped = try UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil, scope: "Fable")
+        XCTAssertEqual(CodexEdgeText.windowTitle(scoped, preferences: preferences), "Fable week")
+        preferences.language = .spanish
+        XCTAssertEqual(CodexEdgeText.windowTitle(scoped, preferences: preferences), "Semana Fable")
+        let plain = try UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil)
+        XCTAssertEqual(CodexEdgeText.windowTitle(plain, preferences: preferences), "Semana")
+    }
+
+    func testPlansWithoutSessionAreDetected() throws {
+        let weeklyOnly = try UsageSnapshot(
+            provider: .codex,
+            preferredWindow: UsageWindow(durationMinutes: 10_080, usedPercent: 0, resetsAt: nil),
+            additionalWindows: [], weeklySpend: nil, freshness: .fresh, isActivelyUsed: false, capturedAt: now
+        )
+        XCTAssertFalse(CodexUsageDetailView.hasSession(weeklyOnly))
+        XCTAssertEqual(CodexEdgeLayout.gaugeRows(weeklyOnly).map { $0.map { $0?.id } }, [[nil, "10080|"]])
+    }
+
+    func testExtraLimitGroupsGetTheirOwnRows() throws {
+        let windows = [
+            try UsageWindow(durationMinutes: 10_080, usedPercent: 0, resetsAt: nil),
+            try UsageWindow(durationMinutes: 300, usedPercent: 1, resetsAt: nil, scope: "Spark"),
+            try UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil, scope: "Spark"),
+        ]
+        let snapshot = try UsageSnapshot(
+            provider: .codex, preferredWindow: windows[0], additionalWindows: Array(windows.dropFirst()),
+            weeklySpend: nil, freshness: .fresh, isActivelyUsed: false, capturedAt: now
+        )
+        XCTAssertEqual(CodexEdgeLayout.gaugeRows(snapshot).map { $0.map { $0?.id } },
+                       [[nil, "10080|"], ["300|Spark", "10080|Spark"]])
+
+        let claudeLike = try UsageSnapshot(
+            provider: .claude,
+            preferredWindow: UsageWindow(durationMinutes: 300, usedPercent: 1, resetsAt: nil),
+            additionalWindows: [
+                UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil),
+                UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil, scope: "Fable"),
+            ],
+            weeklySpend: nil, freshness: .fresh, isActivelyUsed: false, capturedAt: now
+        )
+        XCTAssertEqual(CodexEdgeLayout.gaugeRows(claudeLike).count, 1, "three limits fit in one row")
     }
 
     func testResetLabelsCoverEveryRange() throws {

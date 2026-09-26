@@ -7,29 +7,59 @@ enum CodexEdgeLayout {
     // Keep the bridge close to the notch's roughly 32–38pt safe-area height.
     static let topHeight: CGFloat = 36
     static let detailWidth: CGFloat = 324
-    static let detailHeight: CGFloat = 350
+    static let detailHeight: CGFloat = 412
     static let gap: CGFloat = 8
+
+    static let panelPadding: CGFloat = 18
+    static let headerHeight: CGFloat = 36
+    static let cardSpacing: CGFloat = 10
+    static let cardChrome: CGFloat = 54
+    static let gaugesHeight: CGFloat = 112
+    static let staleNoteHeight: CGFloat = 24
+    static let footerHeight: CGFloat = 26
 
     static func tabSize(_ position: EdgePosition) -> CGSize {
         position == .top ? CGSize(width: topWidth, height: topHeight) : CGSize(width: tabWidth, height: tabHeight)
     }
 
-    static let sectionHeaderHeight: CGFloat = 26
-    static let claudeHintHeight: CGFloat = 52
+    static let gaugesPerRow = 3
 
-    /// Height of one provider's section body, excluding its header.
-    static func sectionHeight(provider: ProviderID, snapshot: UsageSnapshot?) -> CGFloat {
-        guard let snapshot else { return provider == .codex ? 100 : claudeHintHeight }
-        return CGFloat(snapshot.windows.count) * 88 + (snapshot.freshness == .stale ? 28 : 0)
+    /// Gauges a card shows: every window, plus a "no session limit" slot
+    /// when the plan reports no plan-wide 5-hour window.
+    static func gaugeCount(_ snapshot: UsageSnapshot) -> Int {
+        snapshot.windows.count + (snapshot.windows.contains { $0.durationMinutes == 300 && $0.scope == nil } ? 0 : 1)
+    }
+
+    /// Gauge rows: one row when everything fits, otherwise the plan-wide
+    /// limits first and then one group per scope, each split into rows of
+    /// `gaugesPerRow`. `nil` is the "no session limit" slot.
+    static func gaugeRows(_ snapshot: UsageSnapshot) -> [[UsageWindow?]] {
+        let hasSession = snapshot.windows.contains { $0.durationMinutes == 300 && $0.scope == nil }
+        let all: [UsageWindow?] = (hasSession ? [] : [nil]) + snapshot.windows.map { $0 }
+        if all.count <= gaugesPerRow { return [all] }
+        var groups: [[UsageWindow?]] = [all.filter { $0?.scope == nil }]
+        var scopes: [String] = []
+        for window in snapshot.windows { if let scope = window.scope, !scopes.contains(scope) { scopes.append(scope) } }
+        groups += scopes.map { scope in snapshot.windows.filter { $0.scope == scope }.map { $0 } }
+        return groups.filter { !$0.isEmpty }.flatMap { group in
+            stride(from: 0, to: group.count, by: gaugesPerRow).map { Array(group[$0..<min($0 + gaugesPerRow, group.count)]) }
+        }
+    }
+
+    /// Height of one provider card, including its padding and header.
+    static func cardHeight(provider: ProviderID, snapshot: UsageSnapshot?) -> CGFloat {
+        guard let snapshot else { return cardChrome + 44 }
+        return cardChrome + CGFloat(gaugeRows(snapshot).count) * gaugesHeight
+            + (snapshot.freshness == .stale ? staleNoteHeight : 0)
     }
 
     @MainActor
     static func panelHeight(settings: Bool, model: AppModel) -> CGFloat {
         if settings { return detailHeight }
-        let sections = model.configuredProviderIDs
-        let bodies = sections.reduce(CGFloat(0)) { $0 + sectionHeight(provider: $1, snapshot: model.snapshot(for: $1)) }
-        let headers = sections.count > 1 ? CGFloat(sections.count) * sectionHeaderHeight : 0
-        return 142 + bodies + headers
+        let providers = model.configuredProviderIDs
+        let cards = providers.reduce(CGFloat(0)) { $0 + cardHeight(provider: $1, snapshot: model.snapshot(for: $1)) }
+        let spacing = CGFloat(max(providers.count - 1, 0)) * cardSpacing
+        return panelPadding * 2 + headerHeight + 14 + cards + spacing + footerHeight
     }
 
     @MainActor
@@ -38,23 +68,11 @@ enum CodexEdgeLayout {
     }
 }
 
-private enum DockStyle {
-    static let muted = Color.white.opacity(0.58)
-    static func tint(_ used: Int) -> Color {
-        switch UsageRingLevel(remainingPercent: 100 - used) {
-        case .plenty: Color(red: 0.35, green: 0.85, blue: 0.62)
-        case .moderate: Color(red: 0.96, green: 0.82, blue: 0.35)
-        case .low: Color(red: 1, green: 0.59, blue: 0.28)
-        case .critical: Color(red: 1, green: 0.33, blue: 0.35)
-        }
-    }
-}
-
 /// Flat at the physical edge; rounded only on the exposed side.
 private struct AttachedPill: Shape {
     let position: EdgePosition
     func path(in rect: CGRect) -> Path {
-        let radius: CGFloat = position == .top ? 10 : 17
+        let radius: CGFloat = position == .top ? 12 : 22
         return UnevenRoundedRectangle(
             topLeadingRadius: position == .left || position == .top ? 0 : radius,
             bottomLeadingRadius: position == .left ? 0 : radius,
@@ -64,6 +82,8 @@ private struct AttachedPill: Shape {
     }
 }
 
+/// The pill beside the notch or on a screen edge. At the notch it stays
+/// black so it reads as part of the hardware; on the sides it is glass.
 struct CodexEdgeView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var preferences: AppPreferences = .shared
@@ -73,35 +93,22 @@ struct CodexEdgeView: View {
     /// The pill follows the provider in use; the panel shows all of them.
     private var snapshot: UsageSnapshot? { model.displayedSnapshot }
     private var provider: ProviderID { model.displayedProviderID ?? .codex }
+    private var atNotch: Bool { preferences.position == .top }
 
     var body: some View {
         Button(action: onOpen) {
-            Group {
-                if preferences.position == .top {
-                    HStack(spacing: 8) {
-                        logoRing(size: 24)
-                        VStack(alignment: .leading, spacing: 0) {
-                            percentage.font(.system(size: 15, weight: .semibold, design: .rounded))
-                            Text(percentLabel).font(.system(size: 8)).foregroundStyle(DockStyle.muted)
-                        }
-                    }
-                } else {
-                    VStack(spacing: 6) {
-                        logoRing(size: 46)
-                        percentage.font(.system(size: 19, weight: .semibold, design: .rounded))
-                    }
-                }
-            }
-            .frame(width: preferences.position == .top ? topWidth : CodexEdgeLayout.tabWidth,
-                   height: CodexEdgeLayout.tabSize(preferences.position).height)
-            // Reserve the overlap above the content: only this black background
-            // enters the camera cutout; the logo and percentage start below it.
-            .padding(.top, preferences.position == .top ? topOverlap : 0)
-            .background(.black, in: AttachedPill(position: preferences.position))
-            .foregroundStyle(.white)
-            .contentShape(AttachedPill(position: preferences.position))
+            pillContent
+                .frame(width: atNotch ? topWidth : CodexEdgeLayout.tabWidth,
+                       height: CodexEdgeLayout.tabSize(preferences.position).height)
+                // Reserve the overlap above the content: only this black background
+                // enters the camera cutout; the logo and percentage start below it.
+                .padding(.top, atNotch ? topOverlap : 0)
+                .modifier(PillSurface(position: preferences.position))
+                .foregroundStyle(.white)
+                .contentShape(AttachedPill(position: preferences.position))
         }
         .buttonStyle(.plain)
+        .environment(\.colorScheme, .dark)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityValue(model.isPulseOpen ? preferences.text("Details open", "Detalle abierto") : preferences.text("Details closed", "Detalle cerrado"))
         .accessibilityHint(snapshot?.freshness == .stale ? preferences.text("Last known usage. Update pending.", "Último consumo conocido. Pendiente de actualizar.") : "")
@@ -111,6 +118,23 @@ struct CodexEdgeView: View {
                 .disabled(model.connectionStates.values.contains(.connecting))
             Divider()
             Button(preferences.text("Quit", "Salir")) { NSApplication.shared.terminate(nil) }
+        }
+    }
+
+    @ViewBuilder
+    private var pillContent: some View {
+        if atNotch {
+            HStack(spacing: 7) {
+                logoRing(size: 24, lineWidth: 2.5)
+                percentage.font(.system(size: 15, weight: .semibold, design: .rounded))
+                Text(provider.displayName).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            }
+        } else {
+            VStack(spacing: 4) {
+                logoRing(size: 42, lineWidth: 3)
+                percentage.font(.system(size: 18, weight: .semibold, design: .rounded))
+                Text(periodLabel).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -126,14 +150,16 @@ struct CodexEdgeView: View {
         Text(headlineUsed.map { "\(displayPercent($0))%" } ?? "—").monospacedDigit()
     }
 
-    @ViewBuilder
-    private func logoRing(size: CGFloat) -> some View {
+    private func logoRing(size: CGFloat, lineWidth: CGFloat) -> some View {
         ZStack {
             UsageRing(used: headlineUsed,
                       showsConsumed: preferences.showsConsumedPercent,
-                      stale: snapshot?.freshness == .stale)
-            ProviderMark(provider: provider, color: .white.opacity(0.92)).frame(width: size * 0.52, height: size * 0.52)
-        }.frame(width: size, height: size)
+                      stale: snapshot?.freshness == .stale,
+                      lineWidth: lineWidth)
+            ProviderMark(provider: provider, color: .white.opacity(0.95))
+                .frame(width: size * 0.5, height: size * 0.5)
+        }
+        .frame(width: size, height: size)
     }
 
     private var accessibilitySummary: String {
@@ -159,19 +185,36 @@ struct CodexEdgeView: View {
     }
 }
 
+private struct PillSurface: ViewModifier {
+    let position: EdgePosition
+    func body(content: Content) -> some View {
+        if position == .top {
+            content.background(.black, in: AttachedPill(position: position))
+        } else {
+            content.islandGlass(in: AttachedPill(position: position), interactive: true)
+        }
+    }
+}
+
+/// Progress ring used by the pill and by each window gauge.
 private struct UsageRing: View {
     let used: Int?
     let showsConsumed: Bool
     let stale: Bool
+    var lineWidth: CGFloat = 3
+
     var body: some View {
         ZStack {
-            Circle().stroke(.white.opacity(0.17), lineWidth: 3)
+            Circle().stroke(IslandPalette.track, lineWidth: lineWidth)
             if let used {
                 Circle().trim(from: 0, to: CGFloat(showsConsumed ? used : 100 - used) / 100)
-                    .stroke(DockStyle.tint(used), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: stale ? [3, 3] : []))
+                    .stroke(IslandPalette.level(used),
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, dash: stale ? [lineWidth, lineWidth * 1.4] : []))
                     .rotationEffect(.degrees(-90))
             }
-        }.padding(2).accessibilityHidden(true)
+        }
+        .padding(lineWidth / 2)
+        .accessibilityHidden(true)
     }
 }
 
@@ -191,6 +234,7 @@ struct DockIndicatorContent: View {
     }
 }
 
+/// The glass panel: usage cards, or settings, in one surface.
 struct CodexPanelContent: View {
     @ObservedObject var model: AppModel
     @ObservedObject var preferences: AppPreferences
@@ -203,63 +247,30 @@ struct CodexPanelContent: View {
     private var height: CGFloat {
         CodexEdgeLayout.panelHeight(settings: navigation.showsSettings, model: model)
     }
-    private var showsSingleProvider: Bool { model.configuredProviderIDs.count == 1 }
+    private let panelShape = RoundedRectangle(cornerRadius: 26, style: .continuous)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                if navigation.showsSettings {
-                    Button { navigation.showsSettings = false } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.left")
-                            Text(preferences.text("Back", "Volver"))
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 8).frame(height: 32)
-                        .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                    }.accessibilityLabel(preferences.text("Back to usage", "Volver al consumo"))
-                } else {
-                    ProviderMark(provider: model.displayedProviderID ?? .codex, color: .white.opacity(0.8))
-                        .frame(width: 20, height: 20)
-                        .frame(height: 32)
-                }
-                Text(navigation.showsSettings ? preferences.text("Settings", "Ajustes") : preferences.text("Usage", "Consumo"))
-                    .font(.system(size: 16, weight: .semibold))
-                Spacer(minLength: 0)
-                Button(action: onClose) {
-                    Image(systemName: "xmark").frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }.accessibilityLabel(preferences.text("Close", "Cerrar"))
-            }
-            .font(.system(size: 12, weight: .medium)).buttonStyle(.plain)
-            .frame(height: 32)
-
+        VStack(alignment: .leading, spacing: 14) {
+            header
             ZStack(alignment: .topLeading) {
                 if navigation.showsSettings {
                     AppearanceSettingsView(preferences: preferences, claude: claude)
-                        .frame(height: CodexEdgeLayout.detailHeight - 88, alignment: .topLeading)
                         .transition(pageTransition(forward: true))
                 } else {
-                    CodexUsageDetailView(model: model, preferences: preferences) {
-                        navigation.showsSettings = true
-                    }
-                    .frame(height: CodexEdgeLayout.panelHeight(settings: false, model: model) - 88)
-                    .transition(pageTransition(forward: false))
+                    CodexUsageDetailView(model: model, preferences: preferences)
+                        .transition(pageTransition(forward: false))
                 }
             }
-            .frame(height: height - 88, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(20)
+        .padding(CodexEdgeLayout.panelPadding)
         .frame(width: CodexEdgeLayout.detailWidth, height: height, alignment: .topLeading)
-        .background(.black)
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
+        .islandGlass(in: panelShape)
         .foregroundStyle(.white)
-        .preferredColorScheme(.dark)
+        .environment(\.colorScheme, .dark)
         .environment(\.locale, preferences.locale)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: navigation.showsSettings)
-        // A stable transparent host lets SwiftUI animate the actual black surface
+        // A stable transparent host lets SwiftUI animate the actual surface
         // without fighting AppKit window resizing. At the notch it stays top-aligned.
         .frame(height: CodexEdgeLayout.envelopeHeight(model: model),
                alignment: preferences.position == .top ? .top : .center)
@@ -268,125 +279,236 @@ struct CodexPanelContent: View {
                height: CodexEdgeLayout.envelopeHeight(model: model) * displayScale.value)
     }
 
+    private var header: some View {
+        HStack(spacing: 8) {
+            if navigation.showsSettings {
+                Button { navigation.showsSettings = false } label: {
+                    Image(systemName: "chevron.left").frame(width: 28, height: 28)
+                }
+                .islandIconButtonStyle()
+                .help(preferences.text("Back to usage", "Volver al consumo"))
+                .accessibilityLabel(preferences.text("Back to usage", "Volver al consumo"))
+                Text(preferences.text("Settings", "Ajustes")).font(.system(size: 17, weight: .semibold))
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(preferences.text("Usage", "Consumo")).font(.system(size: 17, weight: .semibold))
+                    if !model.providers.isEmpty {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Text(CodexEdgeText.updatedLabel(model.lastUpdatedAt, now: context.date, preferences: preferences))
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if !navigation.showsSettings {
+                iconButton("arrow.clockwise", label: preferences.text("Refresh usage", "Actualizar consumo")) {
+                    Task { await model.refreshUsage() }
+                }
+                .disabled(model.connectionStates.values.contains(.connecting))
+                iconButton("gearshape", label: preferences.text("Settings", "Ajustes")) {
+                    navigation.showsSettings = true
+                }
+            }
+            iconButton("xmark", label: preferences.text("Close", "Cerrar"), action: onClose)
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .frame(height: CodexEdgeLayout.headerHeight)
+    }
+
+    private func iconButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).frame(width: 28, height: 28)
+        }
+        .islandIconButtonStyle()
+        .help(label)
+        .accessibilityLabel(label)
+    }
+
     private func pageTransition(forward: Bool) -> AnyTransition {
         reduceMotion ? .identity : .opacity.combined(with: .offset(x: forward ? 10 : -10))
     }
 }
 
+/// One card per provider, each with a ring gauge per usage window.
 struct CodexUsageDetailView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var preferences: AppPreferences = .shared
-    var onSettings: () -> Void
 
     private var providers: [ProviderID] { model.configuredProviderIDs }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(providers) { provider in
-                VStack(alignment: .leading, spacing: 8) {
-                    if providers.count > 1 { sectionHeader(provider) }
-                    section(provider)
+        VStack(alignment: .leading, spacing: CodexEdgeLayout.cardSpacing) {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                VStack(spacing: CodexEdgeLayout.cardSpacing) {
+                    ForEach(providers) { provider in
+                        card(provider, now: context.date)
+                    }
                 }
             }
             Spacer(minLength: 0)
-            Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
-            HStack {
-                Text(preferences.showsConsumedPercent
-                     ? preferences.text("Quota used", "Cuota usada")
-                     : preferences.text("Quota available", "Cuota disponible"))
-                    .font(.system(size: 10)).foregroundStyle(DockStyle.muted)
-                Spacer()
-                Button { Task { await model.refreshUsage() } } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 24) }
-                    .disabled(model.connectionStates.values.contains(.connecting))
-                    .help(preferences.text("Refresh usage", "Actualizar consumo"))
-                    .accessibilityLabel(preferences.text("Refresh usage", "Actualizar consumo"))
-                Button(action: onSettings) { Image(systemName: "gearshape").frame(width: 26, height: 24) }
-                    .help(preferences.text("Settings", "Ajustes"))
-                    .accessibilityLabel(preferences.text("Settings", "Ajustes"))
-            }.font(.system(size: 13)).buttonStyle(.plain).foregroundStyle(.white.opacity(0.75))
+            Text(preferences.showsConsumedPercent
+                 ? preferences.text("Quota used", "Cuota usada")
+                 : preferences.text("Quota available", "Cuota disponible"))
+                .font(.system(size: 11)).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
         }
     }
 
-    private func sectionHeader(_ provider: ProviderID) -> some View {
-        HStack(spacing: 6) {
-            ProviderMark(provider: provider, color: .white.opacity(0.85)).frame(width: 13, height: 13)
-            Text(provider.displayName).font(.system(size: 12, weight: .semibold))
-            if provider == model.displayedProviderID, providers.count > 1 {
-                Circle().fill(.white.opacity(0.55)).frame(width: 4, height: 4)
-                    .accessibilityLabel(preferences.text("Shown in the pill", "Mostrado en la pill"))
-            }
-        }
-        .frame(height: 18)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    @ViewBuilder
-    private func section(_ provider: ProviderID) -> some View {
-        if let snapshot = model.snapshot(for: provider) {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                VStack(spacing: 16) {
-                    ForEach(snapshot.windows, id: \.durationMinutes) { window in
-                        usageRow(window, snapshot: snapshot, now: context.date)
-                    }
+    private func card(_ provider: ProviderID, now: Date) -> some View {
+        let snapshot = model.snapshot(for: provider)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                ProviderMark(provider: provider, color: IslandPalette.brand(provider)).frame(width: 15, height: 15)
+                Text(provider.displayName).font(.system(size: 14, weight: .semibold))
+                Spacer(minLength: 0)
+                if provider == model.displayedProviderID, model.providers.count > 1 {
+                    Text(preferences.text("In use", "En uso"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.white.opacity(0.16), in: Capsule())
+                        .accessibilityLabel(preferences.text("Shown in the pill", "Mostrado en la pill"))
                 }
             }
-            if snapshot.freshness == .stale {
-                Text(preferences.text("Last known usage · update pending", "Último consumo conocido · pendiente de actualizar"))
-                    .font(.system(size: 10)).foregroundStyle(.orange)
+            .frame(height: 20)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+
+            if let snapshot {
+                let rows = CodexEdgeLayout.gaugeRows(snapshot)
+                let perRow = CodexEdgeLayout.gaugesPerRow
+                let ringSize: CGFloat = CodexEdgeLayout.gaugeCount(snapshot) > 2 ? 62 : 72
+                VStack(spacing: 0) {
+                    ForEach(rows.indices, id: \.self) { row in
+                        HStack(spacing: 0) {
+                            ForEach(rows[row].indices, id: \.self) { index in
+                                Group {
+                                    if let window = rows[row][index] {
+                                        gauge(window, snapshot: snapshot, now: now, ringSize: ringSize)
+                                    } else {
+                                        noSessionGauge(ringSize: ringSize)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            // Keep short rows aligned to the columns above.
+                            if rows.count > 1 {
+                                ForEach(0..<(perRow - rows[row].count), id: \.self) { _ in
+                                    Color.clear.frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                        .frame(height: CodexEdgeLayout.gaugesHeight, alignment: .top)
+                    }
+                }
+                if snapshot.freshness == .stale {
+                    Label(preferences.text("Last known usage · update pending", "Último consumo conocido · pendiente de actualizar"),
+                          systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                        .frame(height: CodexEdgeLayout.staleNoteHeight - 10)
+                }
+            } else {
+                Text(unavailableText(provider))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else if provider == .claude {
-            Text(claudeHint)
-                .font(.system(size: 12)).foregroundStyle(DockStyle.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: CodexEdgeLayout.claudeHintHeight - 8, alignment: .topLeading)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.connectionStates[provider] == .connecting ? preferences.text("Connecting…", "Conectando…") : preferences.text("Usage unavailable", "Consumo no disponible"))
-                    .font(.system(size: 15, weight: .medium))
-                Text(preferences.text("Check that your Codex CLI is installed and signed in.", "Comprueba que Codex CLI esté instalado y tenga una sesión iniciada."))
-                    .font(.system(size: 12)).foregroundStyle(DockStyle.muted)
-            }.frame(maxWidth: .infinity, minHeight: 85, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: CodexEdgeLayout.cardHeight(provider: provider, snapshot: snapshot), alignment: .top)
+        .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
+    }
+
+    private func unavailableText(_ provider: ProviderID) -> String {
+        let cli = provider == .codex ? "Codex CLI" : "Claude Code"
+        if model.connectionStates[provider] == .connecting, model.issues[provider] == nil {
+            return preferences.text("Connecting…", "Conectando…")
+        }
+        switch model.issues[provider] ?? .unavailable {
+        case .notInstalled:
+            return preferences.text("\(cli) is not installed.", "\(cli) no está instalado.")
+        case .notSignedIn:
+            return preferences.text("Sign in to \(cli) in Terminal with your subscription.",
+                                    "Inicia sesión en \(cli) desde la Terminal con tu suscripción.")
+        case .noPlanLimits:
+            return preferences.text("This account has no plan limits (API key or pay-as-you-go).",
+                                    "Esta cuenta no tiene límites de plan (clave de API o pago por uso).")
+        case .unavailable:
+            return preferences.text("Couldn't read usage. Try refreshing.",
+                                    "No se pudo leer el consumo. Prueba actualizar.")
         }
     }
 
-    private var claudeHint: String {
-        preferences.text("Claude Code not found or not signed in.",
-                         "No se encontró Claude Code o no tiene sesión iniciada.")
+    static func hasSession(_ snapshot: UsageSnapshot) -> Bool {
+        snapshot.windows.contains { $0.durationMinutes == 300 && $0.scope == nil }
     }
 
-    private func usageRow(_ window: UsageWindow, snapshot: UsageSnapshot, now: Date) -> some View {
+    /// Some plans (for example during a Codex promotion) report no 5-hour
+    /// limit; say so instead of leaving the card lopsided.
+    private func noSessionGauge(ringSize: CGFloat) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle().stroke(IslandPalette.track, style: StrokeStyle(lineWidth: 5, dash: [2, 5])).padding(2.5)
+                Text("—").font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(.tertiary)
+            }
+            .frame(width: ringSize, height: ringSize)
+            .padding(.bottom, 2)
+            Text(preferences.text("Session", "Sesión")).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            Text(preferences.text("No limit", "Sin límite")).font(.system(size: 11)).foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(preferences.text("Session", "Sesión"))
+        .accessibilityValue(preferences.text("No 5-hour limit reported for this plan", "Sin límite de 5 horas informado para este plan"))
+    }
+
+    private func gauge(_ window: UsageWindow, snapshot: UsageSnapshot, now: Date, ringSize: CGFloat) -> some View {
         // A stale window past its reset no longer describes current usage.
         let outdated = snapshot.freshness == .stale && window.hasReset(at: now)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(CodexEdgeText.windowTitle(window.durationMinutes, preferences: preferences))
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(DockStyle.muted)
-                Spacer()
-                Text(outdated ? "—" : "\(preferences.showsConsumedPercent ? window.usedPercent : 100 - window.usedPercent)%")
-                    .font(.system(size: 27, weight: .light, design: .rounded)).monospacedDigit()
+        let shown = preferences.showsConsumedPercent ? window.usedPercent : window.remainingPercent
+        let title = CodexEdgeText.windowTitle(window, preferences: preferences)
+        return VStack(spacing: 4) {
+            ZStack {
+                UsageRing(used: outdated ? nil : window.usedPercent,
+                          showsConsumed: preferences.showsConsumedPercent,
+                          stale: snapshot.freshness == .stale,
+                          lineWidth: 5)
+                Text(outdated ? "—" : "\(shown)%")
+                    .font(.system(size: ringSize * 0.25, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .padding(.horizontal, 9)
             }
-            GeometryReader { proxy in
-                Capsule().fill(.white.opacity(0.14))
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(DockStyle.tint(window.usedPercent))
-                            .frame(width: outdated ? 0 : proxy.size.width * CGFloat(preferences.showsConsumedPercent ? window.usedPercent : window.remainingPercent) / 100)
-                    }
-            }.frame(height: 4).accessibilityHidden(true)
-            Text(CodexEdgeText.resetLabel(window.resetsAt, now: now, preferences: preferences)).font(.system(size: 10)).foregroundStyle(DockStyle.muted)
+            .frame(width: ringSize, height: ringSize)
+            .padding(.bottom, 2)
+            Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Text(CodexEdgeText.compactResetLabel(window.resetsAt, now: now, preferences: preferences))
+                .font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit()
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue((outdated ? preferences.text("Reset pending", "Reinicio pendiente") : "\(shown)% " + (preferences.showsConsumedPercent ? preferences.text("used", "usado") : preferences.text("available", "disponible")))
+                            + ", " + CodexEdgeText.resetLabel(window.resetsAt, now: now, preferences: preferences))
     }
 }
 
 /// Presentation strings for already-normalized usage windows.
 @MainActor
 enum CodexEdgeText {
+    /// Scoped limits are named by the provider, e.g. "Fable week".
+    static func windowTitle(_ window: UsageWindow, preferences: AppPreferences) -> String {
+        guard let scope = window.scope else { return windowTitle(window.durationMinutes, preferences: preferences) }
+        switch window.durationMinutes {
+        case 10_080: return preferences.text("\(scope) week", "Semana \(scope)")
+        case 300: return preferences.text("\(scope) session", "Sesión \(scope)")
+        default: return "\(scope) · " + windowTitle(window.durationMinutes, preferences: preferences)
+        }
+    }
+
     static func windowTitle(_ durationMinutes: Int, preferences: AppPreferences) -> String {
         switch durationMinutes {
         case 300: return preferences.text("Session", "Sesión")
-        case 10_080: return preferences.text("This week", "Esta semana")
+        case 10_080: return preferences.text("Week", "Semana")
         case let minutes where minutes % 1_440 == 0:
             let days = minutes / 1_440
             return preferences.text(days == 1 ? "1 day" : "\(days) days", days == 1 ? "1 día" : "\(days) días")
@@ -406,5 +528,21 @@ enum CodexEdgeText {
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    /// Short form for the gauges: "in 2h 4m" or "Thu 1, 1:00".
+    static func compactResetLabel(_ date: Date?, now: Date, preferences: AppPreferences) -> String {
+        guard let date else { return "—" }
+        let minutes = Int(ceil(date.timeIntervalSince(now) / 60))
+        if minutes <= 0 { return preferences.text("Resetting", "Reiniciando") }
+        if minutes < 60 { return preferences.text("in \(minutes) min", "en \(minutes) min") }
+        if minutes < 1_440 { return preferences.text("in \(minutes / 60)h \(minutes % 60)m", "en \(minutes / 60)h \(minutes % 60)m") }
+        return date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    static func updatedLabel(_ date: Date, now: Date, preferences: AppPreferences) -> String {
+        if now.timeIntervalSince(date) < 60 { return preferences.text("Updated just now", "Actualizado recién") }
+        let relative = date.formatted(.relative(presentation: .named).locale(preferences.locale))
+        return preferences.text("Updated ", "Actualizado ") + relative
     }
 }

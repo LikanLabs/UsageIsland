@@ -1,3 +1,19 @@
+# Validation — 2026-09-26 (Liquid Glass redesign, plan coverage)
+
+- Redesign with Liquid Glass (macOS 26+; system material fallback on 14–25):
+  glass side pill, black notch pill, glass panel with a card and ring gauges
+  per provider, native settings controls. Official Claude mark from Simple
+  Icons 16.32.0. Layout checked with flat renders; the user reviewed the real
+  glass on their Mac.
+- Live data: Codex (Pro Lite) reports only a weekly window, shown next to a
+  "No limit" session slot. Claude reports session, weekly and a Fable weekly
+  limit through `limits` rows; all three are shown.
+- Codex named buckets become scoped windows; missing-data cards now say
+  whether the CLI is missing, not signed in, or the account has no plan limits.
+- `swift test`: 256 tests pass; resilience checks pass.
+- Not covered: credits and dollar spend caps (not shown), unknown future
+  limit kinds (skipped).
+
 # Validation — 2026-09-26 (Claude provider)
 
 - `swift test`: all tests pass, including new bridge, provider, settings

@@ -94,6 +94,9 @@ outside the product scope.
 - Use bounded timeouts and graceful process shutdown.
 - Redact secrets and personal information from logs.
 
+- Show every window Codex reports: the `codex` bucket first, then other
+  buckets of `rateLimitsByLimitId` that carry a `limitName`, labelled with it.
+
 ## Claude integration rules
 
 - Read plan limits only from Claude Code itself: the CLI's `get_usage` control
@@ -102,7 +105,9 @@ outside the product scope.
   minutes), or the `rate_limits` field it passes to its status line command,
   for which the app's own executable is the command (`--claude-statusline`).
 - The `get_usage` shape is experimental; parse strictly and fall back to the
-  last valid reading.
+  last valid reading. Read limits from its ordered `limits` rows, classified
+  only by `kind` (`session`, `weekly_all`, `weekly_scoped` with its scope
+  name); skip unknown kinds instead of guessing.
 - Store only the rate-limit percentages, reset times and capture time.
 - Never read Claude credentials, the Keychain, OAuth tokens or private
   endpoints such as `api/oauth/usage`.

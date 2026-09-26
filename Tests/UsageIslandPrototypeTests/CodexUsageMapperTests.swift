@@ -447,6 +447,29 @@ final class CodexUsageMapperTests: XCTestCase {
         }
     }
 
+    func testNamedBucketsBecomeScopedWindowsAfterTheMainLimits() throws {
+        let main: JSONValue = .object([
+            "primary": window(duration: 10_080, used: 4, reset: 1_700_000_000),
+            "limitName": .string("Codex")
+        ])
+        let spark: JSONValue = .object([
+            "primary": window(duration: 300, used: 60, reset: 1_700_000_000),
+            "secondary": window(duration: 10_080, used: 20, reset: 1_700_000_000),
+            "limitName": .string("  Spark  ")
+        ])
+        let unnamed: JSONValue = .object(["primary": window(duration: 300, used: 1, reset: 1_700_000_000)])
+        let broken: JSONValue = .string("not a bucket")
+        let value: JSONValue = .object([
+            "rateLimits": main,
+            "rateLimitsByLimitId": .object(["codex": main, "spark": spark, "anon": unnamed, "bad": broken])
+        ])
+
+        let result = try CodexUsageMapper.mapRateLimits(value, capturedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertEqual(result.windows.map(\.id), ["10080|", "300|Spark", "10080|Spark"])
+        XCTAssertEqual(result.preferredWindow.usedPercent, 4, "the pill keeps the main Codex limit")
+        XCTAssertEqual(result.weeklyWindow?.usedPercent, 4)
+    }
+
     func testPercentagesRoundThenUseCanonicalClamp() throws {
         let values: [(JSONValue, Int)] = [
             (.integer(42), 42),

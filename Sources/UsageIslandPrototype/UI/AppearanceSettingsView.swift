@@ -1,136 +1,116 @@
 import SwiftUI
 
-/// Settings live inside the same status-level panel as usage.
+/// Settings live inside the same glass panel as usage and use native
+/// controls, which adopt Liquid Glass on macOS 26 and later.
 struct AppearanceSettingsView: View {
     @ObservedObject var preferences: AppPreferences = .shared
     @ObservedObject var claude: ClaudeConnection
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 label(preferences.text("Position", "Posición"))
                 Picker(preferences.text("Position", "Posición"), selection: $preferences.position) {
                     Text(preferences.text("Left", "Izquierda")).tag(EdgePosition.left)
+                    Text(preferences.text("Notch", "Notch")).tag(EdgePosition.top)
                     Text(preferences.text("Right", "Derecha")).tag(EdgePosition.right)
-                    Text(preferences.text("Notch / Top", "Notch / Arriba")).tag(EdgePosition.top)
-                }.pickerStyle(.segmented).labelsHidden()
+                }
+                .pickerStyle(.segmented).labelsHidden()
             }
-            HStack {
-                label(preferences.text("Auto-hide", "Ocultar automáticamente"))
-                Spacer()
-                Toggle(preferences.text("Auto-hide", "Ocultar automáticamente"), isOn: $preferences.autoHide)
-                    .toggleStyle(PanelSwitchStyle())
-            }
-            HStack {
-                label(preferences.text("Show available %", "Mostrar % disponible"))
-                Spacer()
-                Toggle(preferences.text("Show available percentage", "Mostrar porcentaje disponible"), isOn: Binding(
+            group {
+                toggleRow(preferences.text("Auto-hide", "Ocultar automáticamente"), isOn: $preferences.autoHide)
+                divider
+                toggleRow(preferences.text("Show available %", "Mostrar % disponible"), isOn: Binding(
                     get: { !preferences.showsConsumedPercent },
                     set: { preferences.showsConsumedPercent = !$0 }
                 ))
-                    .toggleStyle(PanelSwitchStyle())
+                divider
+                HStack {
+                    label(preferences.text("Language", "Idioma"))
+                    Spacer()
+                    Picker(preferences.text("Language", "Idioma"), selection: $preferences.language) {
+                        Text(preferences.text("Automatic", "Automático")).tag(AppLanguage.system)
+                        Text("Español").tag(AppLanguage.spanish)
+                        Text("English").tag(AppLanguage.english)
+                    }
+                    .labelsHidden().fixedSize().controlSize(.small)
+                }
+                .frame(height: 26)
             }
-            HStack {
-                label(preferences.text("Language", "Idioma"))
-                Spacer()
-                Picker(preferences.text("Language", "Idioma"), selection: $preferences.language) {
-                    Text(preferences.text("Automatic", "Automático")).tag(AppLanguage.system)
-                    Text("Español").tag(AppLanguage.spanish)
-                    Text("English").tag(AppLanguage.english)
-                }.labelsHidden().fixedSize()
-            }
-            VStack(spacing: 6) {
+            group {
                 HStack {
                     label(preferences.text("Size", "Tamaño"))
                     Spacer()
-                    Text("\(Int((preferences.scale * 100).rounded()))%")
-                        .font(.system(size: 12)).monospacedDigit()
+                    Button("\(Int((preferences.scale * 100).rounded()))%") { preferences.scale = 1 }
+                        .font(.system(size: 12)).monospacedDigit().buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help(preferences.text("Restore original size", "Restaurar tamaño original"))
+                        .accessibilityLabel(preferences.text("Restore original size", "Restaurar tamaño original"))
                 }
                 Slider(value: $preferences.scale, in: AppPreferences.scaleRange, step: 0.05) {
                     Text(preferences.text("Size", "Tamaño"))
-                }.labelsHidden().controlSize(.small)
+                }
+                .labelsHidden().controlSize(.small)
             }
-            claudeRow
-            HStack {
-                Text(preferences.text("Saved automatically", "Se guarda automáticamente"))
-                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
-                Spacer()
-                Button("100%") { preferences.scale = 1 }
-                    .font(.system(size: 11)).buttonStyle(.plain)
-                    .accessibilityLabel(preferences.text("Restore original size", "Restaurar tamaño original"))
-            }
-        }.tint(.white)
+            group { claudeRow }
+        }
     }
 
     /// Optional: the status line bridge updates Claude instantly after each
     /// terminal reply. Claude usage works without it.
     private var claudeRow: some View {
-        HStack(spacing: 6) {
-            ProviderMark(provider: .claude, color: .white.opacity(0.7)).frame(width: 12, height: 12)
-            label(preferences.text("Claude in terminal", "Claude en terminal"))
-                .help(preferences.text("Optional. Updates Claude usage right after each reply in Claude Code in the terminal.",
-                                       "Opcional. Actualiza el consumo de Claude justo después de cada respuesta en Claude Code en la terminal."))
+        HStack(spacing: 7) {
+            ProviderMark(provider: .claude, color: IslandPalette.claude).frame(width: 13, height: 13)
+            VStack(alignment: .leading, spacing: 1) {
+                label(preferences.text("Claude in terminal", "Claude en terminal"))
+                Text(preferences.text("Instant updates", "Actualización instantánea"))
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
+            .help(preferences.text("Optional. Updates Claude usage right after each reply in Claude Code in the terminal.",
+                                   "Opcional. Actualiza el consumo de Claude justo después de cada respuesta en Claude Code en la terminal."))
             Spacer()
             switch claude.status {
             case .notInstalled:
-                panelButton(preferences.text("Connect", "Conectar")) { claude.connect() }
-                    .help(preferences.text("Adds a status line to Claude Code that shares its plan usage with Usage Island.",
-                                           "Añade una barra de estado a Claude Code que comparte su consumo del plan con Usage Island."))
+                Button(preferences.text("Connect", "Conectar")) { claude.connect() }
+                    .islandTextButtonStyle().controlSize(.small)
             case .installed:
-                Text(preferences.text("Connected", "Conectado"))
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
-                panelButton(preferences.text("Disconnect", "Desconectar")) { claude.disconnect() }
+                Button(preferences.text("Disconnect", "Desconectar")) { claude.disconnect() }
+                    .islandTextButtonStyle().controlSize(.small)
             case .otherStatusLine:
-                note(preferences.text("Custom status line in use", "Ya usas otra barra de estado"))
+                note(preferences.text("Own status line", "Barra propia"))
                     .help(preferences.text("Usage Island never replaces your own Claude Code status line.",
                                            "Usage Island nunca reemplaza tu propia barra de estado de Claude Code."))
             case .claudeNotFound:
                 note(preferences.text("Not installed", "No instalado"))
             case .unreadableSettings:
-                note(preferences.text("Settings file unreadable", "Ajustes ilegibles"))
+                note(preferences.text("Settings unreadable", "Ajustes ilegibles"))
             }
         }
-        .frame(height: 24)
         .onAppear { claude.reloadStatus() }
     }
 
-    private func panelButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(.system(size: 11, weight: .medium)).buttonStyle(.plain)
-            .padding(.horizontal, 8).frame(height: 22)
-            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
+    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8, content: content)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
+    }
+
+    private func toggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) { label(title) }
+            .toggleStyle(.switch).controlSize(.small)
+            .frame(height: 22)
+    }
+
+    private var divider: some View {
+        Rectangle().fill(IslandPalette.cardEdge).frame(height: 0.5)
     }
 
     private func note(_ text: String) -> some View {
-        Text(text).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+        Text(text).font(.system(size: 11)).foregroundStyle(.tertiary)
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))
-    }
-}
-
-/// Both switches share the panel's matte monochrome appearance on every macOS.
-private struct PanelSwitchStyle: ToggleStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        Button { configuration.isOn.toggle() } label: {
-            Capsule()
-                .fill(configuration.isOn ? Color.white.opacity(0.9) : Color.white.opacity(0.18))
-                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                    Circle().fill(configuration.isOn ? .black : .white.opacity(0.85))
-                        .frame(width: 14, height: 14).padding(2)
-                }
-                .frame(width: 30, height: 18)
-                .frame(width: 34, height: 24)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: configuration.isOn)
-        .accessibilityRepresentation {
-            Toggle(isOn: configuration.$isOn) { configuration.label }
-        }
+        Text(text).font(.system(size: 12, weight: .medium))
     }
 }

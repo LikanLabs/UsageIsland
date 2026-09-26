@@ -1,10 +1,26 @@
 import Foundation
 
 enum ClaudeUsageError: Error, Equatable, Sendable {
-    /// No record yet: the bridge is not installed or Claude Code has not
-    /// reported limits since it was.
+    /// No reading yet from either source.
     case notConnected
     case invalidRecord
+    /// No `claude` executable was found.
+    case cliNotFound
+    /// The CLI answered that this account has no plan limits.
+    case noPlanLimits
+    /// The CLI ran but gave no usable answer (often: not signed in).
+    case queryFailed
+}
+
+extension ClaudeUsageError: ProviderIssueReporting {
+    var issue: ProviderIssue {
+        switch self {
+        case .cliNotFound: .notInstalled
+        case .noPlanLimits: .noPlanLimits
+        case .queryFailed: .notSignedIn
+        case .notConnected, .invalidRecord: .unavailable
+        }
+    }
 }
 
 /// Claude plan limits from two official sources, whichever is newest:
@@ -27,6 +43,8 @@ actor ClaudeUsageProvider: UsageProvider {
     private var lastQueryAttempt: Date?
     private var queried: (limits: ClaudeUsageResponseParser.Limits, capturedAt: Date)?
     private var inFlightQuery: Task<Void, Never>?
+    /// Why the last CLI query produced nothing, reported when no reading exists.
+    private var lastQueryError: ClaudeUsageError?
 
     init(
         recordURL: URL = ClaudeStatuslineBridge.defaultRecordURL,
@@ -50,31 +68,51 @@ actor ClaudeUsageProvider: UsageProvider {
     func fetchUsage() async throws -> UsageSnapshot {
         await refreshQueryIfDue()
         let now = clock.now()
-        let record = try? readRecord()
+        let recordResult = Result { try readRecord() }
+        let record = try? recordResult.get()
+        let recordActivity = record.map { Date(timeIntervalSince1970: $0.capturedAt) }
 
-        if let queried, record.map({ $0.capturedAt <= queried.capturedAt.timeIntervalSince1970 }) ?? true {
+        if let queried, (recordActivity.map { $0 <= queried.capturedAt } ?? true) {
             return try Self.snapshot(
-                fiveHour: queried.limits.fiveHour.map { ($0.usedPercentage, $0.resetsAt) },
-                sevenDay: queried.limits.sevenDay.map { ($0.usedPercentage, $0.resetsAt) },
+                windows: queried.limits.windows,
                 capturedAt: queried.capturedAt,
-                lastActivityAt: record.map { Date(timeIntervalSince1970: $0.capturedAt) },
+                lastActivityAt: recordActivity,
                 now: now,
                 freshnessInterval: freshnessInterval
             )
         }
-        guard let record else { throw ClaudeUsageError.notConnected }
-        return try Self.snapshot(from: record, now: now, freshnessInterval: freshnessInterval)
+        guard let record else {
+            // A damaged record is worth reporting as such; a missing one
+            // just means the CLI's answer (or its absence) is all there is.
+            if case .failure(ClaudeUsageError.invalidRecord) = recordResult { throw ClaudeUsageError.invalidRecord }
+            throw lastQueryError ?? ClaudeUsageError.notConnected
+        }
+        // The status line has only the plan-wide windows; keep the CLI's
+        // per-model limits alongside them while they are still current.
+        let scoped = (queried?.limits.windows ?? []).filter { window in
+            window.scope != nil && !(window.resetsAt.map { $0 <= now } ?? false)
+        }
+        return try Self.snapshot(from: record, extraWindows: scoped, now: now, freshnessInterval: freshnessInterval)
     }
 
     private func refreshQueryIfDue() async {
         if let inFlightQuery { return await inFlightQuery.value }
         let now = clock.now()
         if let lastQueryAttempt, now.timeIntervalSince(lastQueryAttempt) < queryInterval { return }
-        guard let query = makeQuery() else { return }
         lastQueryAttempt = now
+        guard let query = makeQuery() else {
+            lastQueryError = .cliNotFound
+            return
+        }
         let task = Task {
-            let limits = try? ClaudeUsageResponseParser.limits(from: await query.queryUsage())
-            if let limits { self.store(limits) }
+            do {
+                let limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
+                self.store(limits)
+            } catch let failure as ClaudeUsageResponseParser.Failure {
+                self.noteQueryFailure(failure == .limitsUnavailable ? .noPlanLimits : .queryFailed)
+            } catch {
+                self.noteQueryFailure(.queryFailed)
+            }
         }
         inFlightQuery = task
         await task.value
@@ -83,6 +121,11 @@ actor ClaudeUsageProvider: UsageProvider {
 
     private func store(_ limits: ClaudeUsageResponseParser.Limits) {
         queried = (limits, clock.now())
+        lastQueryError = nil
+    }
+
+    private func noteQueryFailure(_ error: ClaudeUsageError) {
+        lastQueryError = error
     }
 
     private func readRecord() throws -> ClaudeRateLimitRecord {
@@ -100,6 +143,7 @@ actor ClaudeUsageProvider: UsageProvider {
 
     static func snapshot(
         from record: ClaudeRateLimitRecord,
+        extraWindows: [ClaudeUsageResponseParser.Limits.Window] = [],
         now: Date,
         freshnessInterval: TimeInterval
     ) throws -> UsageSnapshot {
@@ -107,17 +151,21 @@ actor ClaudeUsageProvider: UsageProvider {
               record.capturedAt.isFinite, record.capturedAt > 0 else {
             throw ClaudeUsageError.invalidRecord
         }
-        func window(_ window: ClaudeRateLimitRecord.Window?) throws -> (Double, Date)? {
+        func window(_ window: ClaudeRateLimitRecord.Window?, duration: Int) throws -> ClaudeUsageResponseParser.Limits.Window? {
             guard let window else { return nil }
             guard window.resetsAt.isFinite, window.resetsAt > 0 else { throw ClaudeUsageError.invalidRecord }
-            return (window.usedPercentage, Date(timeIntervalSince1970: window.resetsAt))
+            return .init(durationMinutes: duration, scope: nil, usedPercentage: window.usedPercentage,
+                         resetsAt: Date(timeIntervalSince1970: window.resetsAt))
         }
         let capturedAt = Date(timeIntervalSince1970: record.capturedAt)
+        let windows = try [
+            window(record.fiveHour, duration: shortWindowDuration),
+            window(record.sevenDay, duration: weeklyWindowDuration),
+        ].compactMap { $0 } + extraWindows
         // Claude Code reports limits after each terminal reply, so the
         // record's time is the last moment Claude was in use.
         return try snapshot(
-            fiveHour: try window(record.fiveHour),
-            sevenDay: try window(record.sevenDay),
+            windows: windows,
             capturedAt: capturedAt,
             lastActivityAt: capturedAt,
             now: now,
@@ -126,28 +174,29 @@ actor ClaudeUsageProvider: UsageProvider {
     }
 
     static func snapshot(
-        fiveHour: (used: Double, resetsAt: Date)?,
-        sevenDay: (used: Double, resetsAt: Date)?,
+        windows limits: [ClaudeUsageResponseParser.Limits.Window],
         capturedAt: Date,
         lastActivityAt: Date?,
         now: Date,
         freshnessInterval: TimeInterval
     ) throws -> UsageSnapshot {
-        func window(_ value: (used: Double, resetsAt: Date)?, duration: Int) throws -> UsageWindow? {
-            guard let value else { return nil }
-            guard let used = UsagePercent.canonical(value.used) else { throw ClaudeUsageError.invalidRecord }
-            return try UsageWindow(durationMinutes: duration, usedPercent: used, resetsAt: value.resetsAt)
+        let windows = try limits.map { limit in
+            guard let used = UsagePercent.canonical(limit.usedPercentage) else { throw ClaudeUsageError.invalidRecord }
+            return try UsageWindow(durationMinutes: limit.durationMinutes, usedPercent: used,
+                                   resetsAt: limit.resetsAt, scope: limit.scope)
         }
-        let windows = try [
-            window(fiveHour, duration: shortWindowDuration),
-            window(sevenDay, duration: weeklyWindowDuration),
-        ].compactMap { $0 }
-        guard let preferred = windows.first else { throw ClaudeUsageError.invalidRecord }
+        // The pill shows the session when there is one, else the weekly limit.
+        let preferredIndex = windows.firstIndex { $0.durationMinutes == shortWindowDuration && $0.scope == nil }
+            ?? windows.firstIndex { $0.scope == nil }
+            ?? windows.startIndex
+        guard windows.indices.contains(preferredIndex) else { throw ClaudeUsageError.invalidRecord }
+        var others = windows
+        let preferred = others.remove(at: preferredIndex)
 
         var snapshot = try UsageSnapshot(
             provider: .claude,
             preferredWindow: preferred,
-            additionalWindows: Array(windows.dropFirst()),
+            additionalWindows: others,
             weeklySpend: nil,
             freshness: now.timeIntervalSince(capturedAt) <= freshnessInterval ? .fresh : .stale,
             isActivelyUsed: false,

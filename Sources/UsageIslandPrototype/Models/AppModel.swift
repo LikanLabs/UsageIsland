@@ -20,6 +20,8 @@ public final class AppModel: ObservableObject {
     /// The provider the pill shows: the one used most recently since launch,
     /// otherwise the previous choice, otherwise the most critical one.
     @Published public private(set) var displayedProviderID: ProviderID?
+    /// Why a provider without a reading has none; cleared on success.
+    @Published public private(set) var issues: [ProviderID: ProviderIssue] = [:]
 
     private let clock: any UsageClock
     /// Activity before launch is ignored so an old reading cannot outrank a
@@ -170,6 +172,7 @@ public final class AppModel: ObservableObject {
     public func clearUsage(for provider: ProviderID) {
         providers.removeAll { $0.id == provider }
         lastActivity[provider] = nil
+        issues[provider] = nil
         connectionStates[provider] = .disconnected
         displayedProviderID = Self.displayedProvider(
             snapshots: providers,
@@ -219,6 +222,7 @@ public final class AppModel: ObservableObject {
             snapshotsByID[snapshot.id] = snapshot
         }
         var newConnectionStates = connectionStates
+        var newIssues = issues
         var successfulCapturedDates: [Date] = []
 
         let now = clock.now()
@@ -226,6 +230,7 @@ public final class AppModel: ObservableObject {
             if let snapshot = result.snapshot {
                 let previous = snapshotsByID[result.id]
                 newConnectionStates[result.id] = .connected
+                newIssues[result.id] = nil
                 // A slower refresh can finish after a newer single-provider one.
                 if let previous, previous.capturedAt > snapshot.capturedAt { continue }
                 if let activity = Self.activity(previous: previous, next: snapshot, now: now),
@@ -244,8 +249,12 @@ public final class AppModel: ObservableObject {
             }
         }
 
+        for result in results where result.snapshot == nil {
+            newIssues[result.id] = result.issue ?? .unavailable
+        }
         providers = ProviderID.allCases.compactMap { snapshotsByID[$0] }
         connectionStates = newConnectionStates
+        if newIssues != issues { issues = newIssues }
         if let newestCapture = successfulCapturedDates.max() {
             lastUpdatedAt = newestCapture
         }
@@ -263,7 +272,7 @@ public final class AppModel: ObservableObject {
     static func activity(previous: UsageSnapshot?, next: UsageSnapshot, now: Date) -> Date? {
         if let previous {
             for window in next.windows {
-                if let old = previous.windows.first(where: { $0.durationMinutes == window.durationMinutes }),
+                if let old = previous.windows.first(where: { $0.id == window.id }),
                    window.usedPercent > old.usedPercent {
                     return max(now, next.lastActivityAt ?? now)
                 }
@@ -338,7 +347,11 @@ public final class AppModel: ObservableObject {
                             snapshot: snapshot
                         )
                     } catch {
-                        return RefreshResult(id: adapter.id, snapshot: nil)
+                        return RefreshResult(
+                            id: adapter.id,
+                            snapshot: nil,
+                            issue: (error as? any ProviderIssueReporting)?.issue ?? .unavailable
+                        )
                     }
                 }
             }
@@ -361,4 +374,5 @@ private struct ValidatedAppModelConfiguration {
 private struct RefreshResult: Sendable {
     let id: ProviderID
     let snapshot: UsageSnapshot?
+    var issue: ProviderIssue? = nil
 }
