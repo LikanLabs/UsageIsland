@@ -9,33 +9,53 @@ extension View {
         if IslandPalette.rendersFlatSurfaces {
             background(Color(white: 0.16).opacity(0.92), in: shape)
                 .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 0.5))
-        } else if #available(macOS 26.0, *) {
-            glassEffect(.regular.tint(IslandPalette.glassTint).interactive(interactive), in: shape)
         } else {
-            background(.ultraThinMaterial, in: shape)
-                .background(IslandPalette.glassTint, in: shape)
-                .overlay(shape.stroke(.white.opacity(0.16), lineWidth: 0.5))
+            #if compiler(>=6.2)
+            // Glass needs the macOS 26 SDK (Xcode 26, Swift 6.2); older
+            // toolchains build the material fallback only.
+            if #available(macOS 26.0, *) {
+                glassEffect(.regular.tint(IslandPalette.glassTint).interactive(interactive), in: shape)
+            } else {
+                materialFallback(in: shape)
+            }
+            #else
+            materialFallback(in: shape)
+            #endif
         }
+    }
+
+    private func materialFallback<S: Shape>(in shape: S) -> some View {
+        background(.ultraThinMaterial, in: shape)
+            .background(IslandPalette.glassTint, in: shape)
+            .overlay(shape.stroke(.white.opacity(0.16), lineWidth: 0.5))
     }
 
     /// Circular icon button that sits on a glass surface.
     @ViewBuilder
     func islandIconButtonStyle() -> some View {
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *), !IslandPalette.rendersFlatSurfaces {
             buttonStyle(.glass).buttonBorderShape(.circle)
         } else {
             buttonStyle(IslandFallbackIconButtonStyle())
         }
+        #else
+        buttonStyle(IslandFallbackIconButtonStyle())
+        #endif
     }
 
     /// Small text button that sits on a glass surface.
     @ViewBuilder
     func islandTextButtonStyle() -> some View {
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *), !IslandPalette.rendersFlatSurfaces {
             buttonStyle(.glass).buttonBorderShape(.capsule)
         } else {
             buttonStyle(.bordered).buttonBorderShape(.capsule)
         }
+        #else
+        buttonStyle(.bordered).buttonBorderShape(.capsule)
+        #endif
     }
 }
 

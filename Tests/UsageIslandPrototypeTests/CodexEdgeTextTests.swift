@@ -18,6 +18,31 @@ final class CodexEdgeTextTests: XCTestCase {
         XCTAssertEqual(CodexEdgeText.windowTitle(4_320, preferences: preferences), "3 días")
     }
 
+    func testPillNamesItsSingleLimit() throws {
+        let preferences = try makePreferences(.spanish)
+        XCTAssertEqual(CodexEdgeText.pillPeriod(300, preferences: preferences), "5 horas")
+        XCTAssertEqual(CodexEdgeText.pillPeriod(10_080, preferences: preferences), "semanal")
+        preferences.language = .english
+        XCTAssertEqual(CodexEdgeText.pillPeriod(300, preferences: preferences), "5 hours")
+        XCTAssertEqual(CodexEdgeText.pillPeriod(10_080, preferences: preferences), "weekly")
+    }
+
+    func testPillPrefersTheFiveHourLimitAndFallsBackToWeekly() throws {
+        let weeklyOnly = try CodexUsageMapper.mapRateLimits(
+            .object(["rateLimits": .object(["primary": .object(["windowDurationMins": .integer(10_080), "usedPercent": .integer(3), "resetsAt": .null])])]),
+            capturedAt: now
+        )
+        XCTAssertEqual(weeklyOnly.preferredWindow.durationMinutes, 10_080)
+        let both = try CodexUsageMapper.mapRateLimits(
+            .object(["rateLimits": .object([
+                "primary": .object(["windowDurationMins": .integer(10_080), "usedPercent": .integer(3), "resetsAt": .null]),
+                "secondary": .object(["windowDurationMins": .integer(300), "usedPercent": .integer(9), "resetsAt": .null]),
+            ])]),
+            capturedAt: now
+        )
+        XCTAssertEqual(both.preferredWindow.durationMinutes, 300)
+    }
+
     func testScopedWindowsAreNamedByTheirScope() throws {
         let preferences = try makePreferences(.english)
         let scoped = try UsageWindow(durationMinutes: 10_080, usedPercent: 1, resetsAt: nil, scope: "Fable")

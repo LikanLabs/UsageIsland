@@ -127,7 +127,7 @@ struct CodexEdgeView: View {
             HStack(spacing: 7) {
                 logoRing(size: 24, lineWidth: 2.5)
                 percentage.font(.system(size: 15, weight: .semibold, design: .rounded))
-                Text(provider.displayName).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                Text(periodLabel).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
             }
         } else {
             VStack(spacing: 4) {
@@ -176,12 +176,11 @@ struct CodexEdgeView: View {
         preferences.showsConsumedPercent ? preferences.text("consumed", "consumido") : preferences.text("available", "disponible")
     }
 
+    /// Names the one limit the pill shows: the 5-hour window when the plan
+    /// has one, otherwise the weekly limit.
     private var periodLabel: String {
-        switch snapshot?.preferredWindow.durationMinutes {
-        case 300: preferences.text("session", "sesión")
-        case 10_080: preferences.text("week", "semana")
-        default: preferences.text("used", "usado")
-        }
+        guard let window = snapshot?.preferredWindow else { return "" }
+        return CodexEdgeText.pillPeriod(window.durationMinutes, preferences: preferences)
     }
 }
 
@@ -528,6 +527,21 @@ enum CodexEdgeText {
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    static func pillPeriod(_ durationMinutes: Int, preferences: AppPreferences) -> String {
+        switch durationMinutes {
+        case 300: return preferences.text("5 hours", "5 horas")
+        case 10_080: return preferences.text("weekly", "semanal")
+        case let minutes where minutes % 1_440 == 0:
+            let days = minutes / 1_440
+            return preferences.text(days == 1 ? "daily" : "\(days) days", days == 1 ? "diario" : "\(days) días")
+        case let minutes where minutes % 60 == 0:
+            let hours = minutes / 60
+            return preferences.text(hours == 1 ? "1 hour" : "\(hours) hours", hours == 1 ? "1 hora" : "\(hours) horas")
+        default:
+            return "\(durationMinutes) min"
+        }
     }
 
     /// Short form for the gauges: "in 2h 4m" or "Thu 1, 1:00".
