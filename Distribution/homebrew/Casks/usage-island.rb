@@ -4,7 +4,7 @@ cask "usage-island" do
 
   url "https://github.com/LikanLabs/UsageIsland/releases/download/v#{version}/Usage-Island.zip"
   name "Usage Island"
-  desc "Codex usage monitor for the macOS menu bar and screen edge"
+  desc "Codex and Claude Code usage beside the MacBook notch"
   homepage "https://github.com/LikanLabs/UsageIsland"
 
   depends_on macos: :sonoma

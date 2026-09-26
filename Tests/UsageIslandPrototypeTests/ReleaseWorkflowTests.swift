@@ -35,6 +35,11 @@ final class ReleaseWorkflowTests: XCTestCase {
             XCTAssertTrue(line.contains("DEVELOPER_ID_CERTIFICATE_P12"), String(line))
         }
         XCTAssertTrue(yaml.contains("tags: ['v[0-9]+.[0-9]+.[0-9]+']"))
+
+        // The tap only moves after the release it points to exists.
+        let tapIndex = try firstIndex(of: "name: Update Homebrew tap", in: yaml)
+        XCTAssertLessThan(publishIndex, tapIndex)
+        XCTAssertTrue(yaml.contains("if: env.HOMEBREW_TAP_TOKEN != ''"))
     }
 
     private func firstIndex(of needle: String, in yaml: String) throws -> String.Index {

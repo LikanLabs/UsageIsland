@@ -6,148 +6,185 @@
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Usage Island is a small native macOS app that shows Codex and Claude Code usage
-at the edge of the screen. It can sit on the left, right, or below the MacBook notch and opens
-a compact panel with the current quota and reset time.
+**Your Codex and Claude Code limits, always one glance away.**
 
-The project is open source and distributed by the [LikanLabs GitHub
-organization](https://github.com/LikanLabs).
+Usage Island is a small native macOS app that sits beside the MacBook notch
+(or on the left or right edge of the screen) and shows how much of your
+subscription limits you have left:
+
+- **Codex**: 5-hour session and weekly limits.
+- **Claude Code**: 5-hour session and weekly limits, the same numbers `/usage`
+  shows.
+
+The pill shows the tool you are using right now. Click it to see both tools,
+with reset times.
+
+No account, no server and no telemetry. Usage Island reuses the Codex and
+Claude Code CLIs you already have signed in and never reads their credentials.
+
+## Contents
+
+- [Install](#install)
+- [Update](#update)
+- [Use](#use)
+- [How it gets your usage](#how-it-gets-your-usage)
+- [Uninstall](#uninstall)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Releases](#releases)
 
 ## Install
 
-The easiest way to install the latest public release is Homebrew:
+Requirements: macOS 14 or later, plus the
+[Codex CLI](https://github.com/openai/codex) and/or
+[Claude Code](https://code.claude.com/docs) installed and
+signed in.
 
 ```sh
 brew tap LikanLabs/tap
 brew install --cask usage-island
-```
-
-After installing it, open it from Terminal with:
-
-```sh
 open -a "Usage Island"
 ```
 
-You can also open `Usage Island` from the **Applications** folder in Finder.
-The app runs in the background and shows the indicator beside the notch; you do
-not need to keep Terminal open.
+The app runs in the background; you can close Terminal. You can also open it
+from **Applications** in Finder.
 
-### First launch on macOS
+### First launch
 
-The free release is signed locally but is not yet notarized by Apple, so macOS
-may block it the first time you open it. If the warning only offers **Move to
-Trash** and **Done**:
+Releases are not yet notarized by Apple, so macOS may block the first launch.
+If the warning only offers **Move to Trash** and **Done**:
 
-1. Click **Done** — do not move the app to the Trash.
+1. Click **Done**. Do not move the app to the Trash.
 2. Open **System Settings → Privacy & Security**.
-3. Scroll down to **Security** and click **Open Anyway** next to Usage Island.
+3. Under **Security**, click **Open Anyway** next to Usage Island.
 4. Confirm with your password, then click **Open**.
 
-The **Open Anyway** option is available for about one hour after attempting to
-launch the app. This approval is normally required only once. See
-[Apple's instructions for opening a blocked app](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac)
-for more information.
+**Open Anyway** stays available for about an hour after the blocked launch,
+and you normally need it only once. See
+[Apple's guide](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac).
+Only do this for builds from this repository or its Homebrew tap.
 
-Only override this warning if you downloaded Usage Island from the
-[official repository](https://github.com/LikanLabs/UsageIsland) or its Homebrew
-tap and trust the source.
+## Update
+
+```sh
+brew update
+brew upgrade --cask usage-island
+```
+
+Then quit Usage Island (right-click the pill → **Quit**) and open it again, so
+the new version starts.
 
 ## Use
 
-Usage Island uses the Codex CLI's existing authentication through `codex app-server`.
-It does not read or copy credential files.
+| Action | What happens |
+| --- | --- |
+| Click the pill | Opens the panel with every tool's usage and refreshes it |
+| Refresh button | Updates now |
+| Gear | Settings: position, auto-hide, available or used %, language, size, Claude in terminal |
+| Right-click the pill | Refresh or quit |
+| Escape or click outside | Closes the panel |
 
-- Click the percentage pill to open the usage panel and refresh the value.
-- Use the refresh button when you want an immediate update.
-- Open the gear to change position, size, language, auto-hide, and the displayed
-  percentage (available or consumed).
-- Use the back arrow to return to usage, or the close button to dismiss the panel.
+**Reading the ring.** The percentage and the ring show the same value. The
+color follows how much quota is left: green above 50 %, yellow above 25 %,
+orange above 10 %, red below.
 
-The percentage and ring use the same value. The ring changes from green to
-yellow, orange, and red as the remaining quota decreases. A stale reading keeps
-its last value and is marked in the panel instead of being replaced with a fake
-value.
+**Which tool the pill shows.** The one you used most recently: Claude as soon
+as Claude Code reports new usage, and Codex when its usage rises. When nothing
+has changed since launch, it shows the tool with the least quota left.
 
-## Claude Code
+**Old readings.** If a refresh fails, the last value stays on screen with a
+dashed ring and a "last known usage" note; it is never replaced by a made-up
+number. Once a window's reset time has passed, the old value is shown as "—".
 
-Usage Island also shows your Claude subscription limits (5-hour session and
-weekly), the same numbers Claude Code shows in `/usage`. It needs the Claude
-Code CLI installed and signed in; nothing else.
+## How it gets your usage
 
-Every two minutes (and when you open the panel) the app asks the installed
-CLI for its structured `/usage` data, using the CLI's own sign-in. The query
-runs isolated (`--restricted`, no MCP servers, no tools, no saved session),
-sends no prompt and uses no tokens. These numbers come from your account, so
-they include Claude Code in the terminal and the desktop app as well as
-claude.ai.
+**Codex.** The app starts `codex app-server` from your installed Codex CLI and
+asks it for the rate limits over JSON-RPC, once a minute and whenever you open
+the panel. The CLI uses its own sign-in.
 
-**Optional: instant updates in the terminal.** In the panel's settings, click
-**Connect** next to **Claude in terminal**. This adds a status line to
-`~/.claude/settings.json` that runs Usage Island in a small bridge mode: after
-each reply it saves only the limit percentages and reset times to
-`~/Library/Application Support/Usage Island/claude-rate-limits.json` and shows
-`5h 32% · 7d 58%` in Claude Code. If you already have your own status line, it
-is left untouched. **Disconnect** removes the bridge and the saved reading.
+**Claude Code.** Every two minutes, and when you open the panel, the app asks
+the installed `claude` CLI for its structured `/usage` data. The query runs
+isolated (`--restricted`, no MCP servers, no tools, no saved session), sends
+no prompt and uses no tokens. The numbers come from your account, so they
+include the terminal, the Claude desktop app and claude.ai.
 
-Usage Island never reads your Claude credentials. The pill shows whichever
-tool you used most recently, and the panel shows both.
+**Optional: instant updates in the terminal.** Under **Settings → Claude in
+terminal**, click **Connect**. This adds a status line to
+`~/.claude/settings.json` that shows `5h 32% · 7d 58%` in Claude Code and
+passes those numbers to Usage Island after each reply. It saves only the
+percentages and reset times, to
+`~/Library/Application Support/Usage Island/claude-rate-limits.json`. If you
+already have your own status line, it is left untouched. **Disconnect**
+removes it. (The Claude desktop app does not run status lines, which is why
+the CLI query above exists.)
 
-## Build locally
-
-Requirements: macOS 14 or later and full Xcode.
-
-```sh
-swift run UsageIslandPrototype
-```
-
-To create an app bundle:
+## Uninstall
 
 ```sh
-./Scripts/package-app.sh
-open "dist/Usage Island.app"
+brew uninstall --zap --cask usage-island
 ```
 
-The local bundle is signed for development and built for the current Mac. It is
-not notarized for public distribution.
+`--zap` also removes the app's preferences. If you connected Claude in the
+terminal, click **Disconnect** first, or remove the `statusLine` entry from
+`~/.claude/settings.json`.
 
-## Development checks
+## Troubleshooting
+
+| You see | Try |
+| --- | --- |
+| "Usage unavailable" under Codex | Run `codex` in Terminal and make sure you are signed in with ChatGPT |
+| "Claude Code not found or not signed in" | Run `claude` in Terminal and sign in with your Claude subscription |
+| No Claude numbers with an API key | Plan limits exist only for Claude subscriptions, not API keys |
+| An old value with a dashed ring | The last refresh failed; click refresh or check your connection |
+| The app does not open | See [First launch](#first-launch) |
+
+## Development
+
+Requirements: macOS 14 or later and full Xcode (Swift 6).
 
 ```sh
-swift build --product UsageIslandPrototype
-swift test
-./Scripts/verify-resilience.sh
+swift run UsageIslandPrototype        # run from source
+swift test                            # unit and integration tests
+./Scripts/verify-resilience.sh        # recovery, sleep/wake and geometry scenarios
+./Scripts/package-app.sh              # build dist/Usage Island.app for this Mac
 ```
 
-Tests use synthetic provider responses. The resilience checks cover refresh
-failures, sleep and wake, process recovery, settings transitions, and adaptive
-notch geometry.
+Tests use synthetic provider responses only. Read [AGENTS.md](AGENTS.md)
+before contributing: it covers the approved design, architecture boundaries
+and the data and privacy rules.
 
 ## Releases
 
-Pushing a version tag such as `v0.1.1` runs the release workflow. It builds an
-Apple Silicon and Intel app, creates a ZIP archive, publishes a SHA-256 file,
-and attaches both files to the GitHub release. Re-running the workflow for the
-same tag replaces those files.
+Pushing a tag such as `v0.1.5` runs the release workflow:
 
-Developer ID signing and notarization are optional. When these repository
-secrets exist, the workflow signs with the hardened runtime, notarizes, and
-staples the app; otherwise it signs ad hoc:
+1. Runs `swift test` and the resilience checks.
+2. Builds a universal (Apple Silicon and Intel) app, zips it and publishes the
+   ZIP and its SHA-256 to the GitHub release. Re-running a tag replaces them.
+3. Updates the cask in [LikanLabs/homebrew-tap](https://github.com/LikanLabs/homebrew-tap)
+   with the new version and checksum, using
+   [`Distribution/homebrew/Casks/usage-island.rb`](Distribution/homebrew/Casks/usage-island.rb)
+   as the template.
 
-| Secret | Contents |
+Optional repository secrets:
+
+| Secret | Enables |
 | --- | --- |
-| `DEVELOPER_ID_CERTIFICATE_P12` | Base64 of the exported Developer ID Application `.p12` |
+| `HOMEBREW_TAP_TOKEN` | Step 3. A fine-grained token with **Contents: read and write** on `LikanLabs/homebrew-tap` only |
+| `DEVELOPER_ID_CERTIFICATE_P12` | Developer ID signing: base64 of the exported `.p12` |
 | `DEVELOPER_ID_CERTIFICATE_PASSWORD` | Password of that `.p12` |
-| `DEVELOPER_ID_IDENTITY` | Identity name, e.g. `Developer ID Application: Name (TEAMID)` |
-| `NOTARY_API_KEY_P8` | Contents of an App Store Connect API key (`.p8`) |
+| `DEVELOPER_ID_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
+| `NOTARY_API_KEY_P8` | Notarization: contents of an App Store Connect API key |
 | `NOTARY_API_KEY_ID` | That key's ID |
 | `NOTARY_API_ISSUER` | The App Store Connect issuer ID |
 
-Locally, `./Scripts/notarize-app.sh <keychain-profile>` notarizes a build made
-with `USAGE_ISLAND_SIGNING_IDENTITY` set.
-
-The Homebrew cask lives in [LikanLabs/homebrew-tap](https://github.com/LikanLabs/homebrew-tap)
-and is updated for each release.
+Without signing secrets the app is signed ad hoc. Without `HOMEBREW_TAP_TOKEN`
+the tap must be updated by hand (see
+[Distribution/homebrew](Distribution/homebrew/README.md)). Locally,
+`./Scripts/notarize-app.sh <keychain-profile>` notarizes a build made with
+`USAGE_ISLAND_SIGNING_IDENTITY` set.
 
 ## License
 
-Usage Island is released under the [MIT License](LICENSE).
+Usage Island is released under the [MIT License](LICENSE). The OpenAI mark is
+from [Simple Icons](https://simpleicons.org) (CC0); see
+[Assets/OpenAI](Assets/OpenAI).
