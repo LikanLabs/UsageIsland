@@ -1,3 +1,21 @@
+# Validation — 2026-09-30 (alerts, login, update relaunch, battery)
+
+- `swift test`: 277 tests pass; the timing-sensitive suites (refresh power,
+  alert monitor, resilience) passed six consecutive runs. Resilience runner
+  passes.
+- Update relaunch, end to end: a packaged 0.1.90 build was running when its
+  bundle was replaced by 0.1.91 (as `brew upgrade` does). 57 s later the old
+  process had exited and 0.1.91 was running from the same path; one Codex
+  app-server remained. The installed app and `~/.claude/settings.json` were
+  untouched by the test copy.
+- Claude `get_usage` still returns every limit with
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1`.
+- The guarded status line command exits 0 with no output when the app is gone.
+- Flat renders checked: settings with the new system section, and the reset
+  countdown pill in edge and notch positions.
+- Not verified live: registering the login item and posting a notification
+  (both need the user's approval in the real app).
+
 # Validation — 2026-09-26 (Liquid Glass redesign, plan coverage)
 
 - Redesign with Liquid Glass (macOS 26+; system material fallback on 14–25):

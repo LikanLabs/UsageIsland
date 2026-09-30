@@ -130,7 +130,7 @@ final class ClaudeSettingsInstallerTests: XCTestCase {
         XCTAssertEqual(statusLine["type"] as? String, "command")
         XCTAssertEqual(
             statusLine["command"] as? String,
-            "'/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype' --claude-statusline"
+            "[ -x '/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype' ] && exec '/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype' --claude-statusline || true"
         )
 
         try installer.uninstall()

@@ -17,7 +17,9 @@ protocol ClaudeUsageQuerying: Sendable {
 /// project and local settings (so no hooks or status line run),
 /// `--strict-mcp-config` starts no MCP servers, `--tools ""` offers no tools
 /// and `--no-session-persistence` saves no transcript. No prompt is sent, so
-/// no model request is made and no tokens are used.
+/// no model request is made and no tokens are used. The app runs this every
+/// couple of minutes, so the child also skips Claude Code's update checks
+/// and non-essential traffic (telemetry, error reports).
 struct ClaudeUsageCommand: ClaudeUsageQuerying {
     static let requestID = "usage-island"
     static let request = Data(#"{"type":"control_request","request_id":"usage-island","request":{"subtype":"get_usage","skip_behaviors":true}}"#.utf8 + [0x0A])
@@ -26,6 +28,13 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         "--no-session-persistence", "--tools", "",
         "--input-format", "stream-json", "--output-format", "stream-json",
     ]
+
+    static func environment(from base: [String: String]) -> [String: String] {
+        var environment = base
+        environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        environment["DISABLE_AUTOUPDATER"] = "1"
+        return environment
+    }
 
     let executableURL: URL
     var timeout: TimeInterval = 20
@@ -49,6 +58,7 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.environment = environment(from: ProcessInfo.processInfo.environment)
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         let input = Pipe()
         let output = Pipe()

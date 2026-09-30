@@ -5,40 +5,52 @@
 Usage Island is a native macOS application that shows AI coding usage at the
 edge of the screen: beside the MacBook notch, or on the left or right edge.
 
-The approved visual baseline is the black CodexEdge interface: an attached
-pill with the Codex mark inside a usage ring, and a details panel that holds
-both usage and settings. The user explicitly approved it on 2026-09-05 as the
-replacement for the earlier v26 prototype, which was removed on 2026-09-26.
+The approved visual baseline is the Liquid Glass interface the user approved
+on 2026-09-26 (it replaced the earlier black CodexEdge look, which in turn
+replaced the v26 prototype): a glass pill attached to a screen edge, or a
+black pill at the base of the notch, with the active provider's mark inside a
+usage ring, and a glass details panel with one card of ring gauges per
+provider plus an in-panel settings page. On macOS 14–25 the glass falls back
+to a system material.
 
-The product supports Codex and Claude Code. The pill shows the provider in
-use most recently; the details panel shows every provider.
+The product supports Codex and Claude Code. The pill shows one limit of the
+provider in use most recently (its 5-hour window when the plan has one,
+otherwise the weekly limit) and names it; the details panel shows every
+provider and every limit.
 
 ## Non-negotiable visual baseline
 
 Do not redesign, resize, restyle, simplify, or reinterpret the approved
-CodexEdge UI.
+Liquid Glass UI.
 
 Preserve:
 
-- the pill attached to the screen edge or the base of the notch;
+- the pill attached to the screen edge (glass) or the base of the notch
+  (black), and its single labelled limit ("5 hours" or "weekly");
 - left, right and top (notch) positions and the auto-hide behavior;
-- the usage ring, its remaining-quota colors and the dashed stale state;
-- details panel dimensions, corner radii, spacing and typography;
-- usage rows, footer controls and the in-panel settings page;
+- the usage rings, their remaining-quota colors, the dashed stale state and
+  the reset countdown when a limit is used up;
+- the glass panel's dimensions, corner radii, spacing and typography;
+- provider cards, gauge rows, header controls and the in-panel settings page;
 - opening, closing and page-transition animations, including Reduce Motion;
-- the geometry in `EdgeWindowGeometry` and `ScreenNotchGeometry`.
+- the geometry in `EdgeWindowGeometry` and `ScreenNotchGeometry`;
+- the app icon (the glass pill), rendered by `Scripts/render-app-icon.swift`.
 
 Do not modify these files unless the user explicitly requests a visual change
 or a compile fix:
 
 - Sources/UsageIslandPrototype/UI/CodexEdgeView.swift
-- Sources/UsageIslandPrototype/UI/CodexMark.swift
+- Sources/UsageIslandPrototype/UI/IslandGlass.swift
 - Sources/UsageIslandPrototype/UI/AppearanceSettingsView.swift
+- Sources/UsageIslandPrototype/UI/CodexMark.swift
+- Sources/UsageIslandPrototype/UI/ClaudeMark.swift
+- Sources/UsageIslandPrototype/UI/ProviderMark.swift
 - Sources/UsageIslandPrototype/Window/CodexEdgeWindowController.swift
 - Sources/UsageIslandPrototype/Window/EdgeWindowGeometry.swift
 - Sources/UsageIslandPrototype/Window/EdgePanelNavigation.swift
 - Sources/UsageIslandPrototype/Window/DockVisibilityState.swift
 - Sources/UsageIslandPrototype/Window/ScreenNotchGeometry.swift
+- Scripts/render-app-icon.swift and Assets/AppIcon/
 
 Backend work must adapt to the existing frontend, not the opposite.
 
@@ -69,7 +81,8 @@ responses, launch subprocesses, read credentials or calculate provider rules.
 ## Provider scope
 
 Usage Island supports Codex through `codex app-server` and Claude Code through
-its status line bridge. Other usage providers and synthetic demo providers are
+its CLI's `get_usage` request, with an optional status line bridge for instant
+terminal updates. Other usage providers and synthetic demo providers are
 outside the product scope.
 
 ## Data rules
@@ -114,6 +127,18 @@ outside the product scope.
 - Change only the `statusLine` key of `~/.claude/settings.json`, only on the
   user's request, and never replace a status line the user already has.
 
+## System integration rules
+
+- Notifications are local only (`UNUserNotificationCenter`), alert only on a
+  change observed from fresh official readings (never on the first reading
+  or stale data), and respect the "Alert when running low" preference.
+- Opening at login uses `SMAppService.mainApp` and is off until the user turns
+  it on.
+- Relaunch after an update only when the bundle on disk reports a different,
+  complete version and the panel is closed.
+- Pause polling while the screen is locked or the displays sleep; stretch the
+  interval in Low Power Mode.
+
 ## Security
 
 - Never log tokens, cookies, authorization headers, complete environment
@@ -129,7 +154,7 @@ Before modifying code:
 
 1. Inspect the relevant implementation and tests.
 2. State which files will change.
-3. Explain how the CodexEdge visual baseline will remain unchanged.
+3. Explain how the Liquid Glass visual baseline will remain unchanged.
 4. Prefer the smallest coherent change.
 
 After modifying code:

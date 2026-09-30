@@ -34,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var refreshController: UsageRefreshController?
     private var islandController: CodexEdgeWindowController?
     private var claudeConnection: ClaudeConnection?
+    private var alertMonitor: UsageAlertMonitor?
+    private var updateCheck: Timer?
+    private var relaunchPending = false
+    private let runningVersion = BundleVersion.onDisk(at: Bundle.main.bundleURL)
     private let claudeRecordURL: URL
     private var initialRefreshTask: Task<Void, Never>?
     private var terminationTask: Task<Void, Never>?
@@ -128,16 +132,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let claude = ClaudeConnection(installer: ClaudeSettingsInstaller(), model: model, recordURL: claudeRecordURL)
         claudeConnection = claude
         claude.start()
-        let island = CodexEdgeWindowController(model: model, claude: claude)
+        let notifier = SystemUsageNotifier()
+        let system = SystemIntegration(login: SystemLoginItem(), notifier: notifier)
+        let alerts = UsageAlertMonitor(model: model, preferences: .shared, notifier: notifier, clock: SystemUsageClock())
+        alertMonitor = alerts
+        alerts.start()
+        let island = CodexEdgeWindowController(model: model, claude: claude, system: system)
         islandController = island
         island.show()
         startInitialRefresh()
         let refresh = UsageRefreshController(model: model)
         refreshController = refresh
         refresh.start()
+        startUpdateCheck()
+    }
+
+    /// `brew upgrade` replaces the bundle while this process keeps running
+    /// the old code. Notice the new version on disk and reopen on it.
+    private func startUpdateCheck() {
+        guard runningVersion != nil else { return }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.relaunchIfUpdated() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        updateCheck = timer
+    }
+
+    private func relaunchIfUpdated() {
+        guard !relaunchPending, !didBeginTermination,
+              AppUpdateRelaunch.shouldRelaunch(
+                running: runningVersion,
+                onDisk: BundleVersion.onDisk(at: Bundle.main.bundleURL),
+                panelOpen: model.isPulseOpen
+              ) else { return }
+        relaunchPending = true
+        do {
+            try AppUpdateRelaunch.scheduleReopen(of: Bundle.main.bundleURL)
+            NSApp.terminate(nil)
+        } catch {
+            relaunchPending = false
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        updateCheck?.invalidate()
+        updateCheck = nil
+        alertMonitor?.stop()
         claudeConnection?.stop()
         refreshController?.stop()
         refreshController = nil

@@ -7,6 +7,7 @@ final class CodexEdgeWindowController {
     private let model: AppModel
     private let preferences: AppPreferences
     private let claude: ClaudeConnection
+    private let system: SystemIntegration
     private let displayScale = EdgeDisplayScale()
     private let navigation = EdgePanelNavigation()
     private var tab: NSPanel?
@@ -23,9 +24,10 @@ final class CodexEdgeWindowController {
     private var screensAsleep = false
     private var animationID = 0
 
-    init(model: AppModel, claude: ClaudeConnection, preferences: AppPreferences = .shared) {
+    init(model: AppModel, claude: ClaudeConnection, system: SystemIntegration, preferences: AppPreferences = .shared) {
         self.model = model
         self.claude = claude
+        self.system = system
         self.preferences = preferences
     }
 
@@ -35,7 +37,7 @@ final class CodexEdgeWindowController {
             self?.togglePulse()
         }))
         tab?.title = "Codex Usage Tab"
-        detail = makePanel(CodexPanelContent(model: model, preferences: preferences, displayScale: displayScale, navigation: navigation, claude: claude, onClose: { [weak self] in
+        detail = makePanel(CodexPanelContent(model: model, preferences: preferences, displayScale: displayScale, navigation: navigation, claude: claude, system: system, onClose: { [weak self] in
             self?.model.closePulse()
         }))
         detail?.title = "Codex Usage Details"

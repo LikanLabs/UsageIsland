@@ -42,8 +42,12 @@ struct ClaudeSettingsInstaller: Sendable {
         claudeDirectory.appendingPathComponent("settings.json", isDirectory: false)
     }
 
+    /// Runs the bridge only while the app still exists, so uninstalling
+    /// Usage Island leaves Claude Code with an empty status line rather than
+    /// a failing command.
     var command: String {
-        Self.shellQuoted(executablePath) + " " + ClaudeStatuslineBridge.argument
+        let path = Self.shellQuoted(executablePath)
+        return "[ -x \(path) ] && exec \(path) \(ClaudeStatuslineBridge.argument) || true"
     }
 
     func status() -> ClaudeBridgeStatus {
@@ -78,9 +82,10 @@ struct ClaudeSettingsInstaller: Sendable {
         try write(settings)
     }
 
-    /// Points an installed bridge back at this app when the executable it
-    /// names no longer exists (for example after the app moved). A bridge
-    /// that still works, such as one from another build, is left alone.
+    /// Rewrites an installed bridge when it points at this app in an older
+    /// command format, or at an executable that no longer exists (for
+    /// example after the app moved). A working bridge from another build of
+    /// the app is left alone.
     func repairIfNeeded() {
         guard status() == .installed,
               let settings = try? readSettings(),
@@ -88,7 +93,7 @@ struct ClaudeSettingsInstaller: Sendable {
               let existingCommand = statusLine["command"] as? String,
               existingCommand != command,
               let existingPath = Self.executablePath(inCommand: existingCommand),
-              !executableExists(existingPath) else { return }
+              existingPath == executablePath || !executableExists(existingPath) else { return }
         try? install()
     }
 
@@ -123,20 +128,35 @@ struct ClaudeSettingsInstaller: Sendable {
     static func isBridge(_ statusLine: Any) -> Bool {
         guard let object = statusLine as? [String: Any],
               let command = object["command"] as? String else { return false }
-        return command.hasSuffix(" " + ClaudeStatuslineBridge.argument)
-            && command.contains("UsageIslandPrototype")
+        return executablePath(inCommand: command).map { $0.hasSuffix("UsageIslandPrototype") } ?? false
     }
 
     static func shellQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// Reverses `shellQuoted` for commands this installer wrote.
+    /// The executable named by a command this installer wrote, in the
+    /// current guarded format or the original `'path' --claude-statusline`.
     static func executablePath(inCommand command: String) -> String? {
-        let suffix = " " + ClaudeStatuslineBridge.argument
-        guard command.hasSuffix(suffix) else { return nil }
-        let quoted = String(command.dropLast(suffix.count))
+        let argument = " " + ClaudeStatuslineBridge.argument
+        let quoted: Substring
+        if command.hasPrefix("[ -x "), command.hasSuffix(argument + " || true") {
+            // [ -x 'P' ] && exec 'P' --claude-statusline || true
+            let inner = command.dropFirst("[ -x ".count).dropLast((argument + " || true").count)
+            guard let separator = inner.range(of: " ] && exec ") else { return nil }
+            let first = inner[..<separator.lowerBound]
+            let second = inner[separator.upperBound...]
+            guard first == second else { return nil }
+            quoted = first
+        } else if command.hasSuffix(argument) {
+            quoted = command.dropLast(argument.count)
+        } else {
+            return nil
+        }
         guard quoted.count >= 2, quoted.hasPrefix("'"), quoted.hasSuffix("'") else { return nil }
-        return String(quoted.dropFirst().dropLast()).replacingOccurrences(of: "'\\''", with: "'")
+        let body = quoted.dropFirst().dropLast()
+        // Only accept what shellQuoted produces: every quote is escaped.
+        guard !body.replacingOccurrences(of: "'\\''", with: "").contains("'") else { return nil }
+        return String(body).replacingOccurrences(of: "'\\''", with: "'")
     }
 }

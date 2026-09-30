@@ -5,6 +5,7 @@ import SwiftUI
 struct AppearanceSettingsView: View {
     @ObservedObject var preferences: AppPreferences = .shared
     @ObservedObject var claude: ClaudeConnection
+    @ObservedObject var system: SystemIntegration
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -52,8 +53,39 @@ struct AppearanceSettingsView: View {
                 }
                 .labelsHidden().controlSize(.small)
             }
+            group {
+                if system.loginItem != .unavailable {
+                    toggleRow(preferences.text("Open at login", "Abrir al iniciar sesión"), isOn: Binding(
+                        get: { system.opensAtLogin },
+                        set: { system.setOpensAtLogin($0) }
+                    ))
+                    if system.loginItem == .requiresApproval {
+                        noteButton(preferences.text("Allow it in System Settings", "Permítelo en Ajustes del Sistema")) {
+                            system.openLoginItemsSettings()
+                        }
+                    }
+                    divider
+                }
+                toggleRow(preferences.text("Alert when running low", "Avisar cuando quede poco"), isOn: $preferences.usageAlerts)
+                    .help(preferences.text("Notifies at 20 %, 10 % and 0 % left, and when a low limit resets.",
+                                           "Avisa al quedar 20 %, 10 % y 0 %, y cuando un límite bajo se reinicia."))
+                if preferences.usageAlerts, system.notificationsDenied {
+                    noteButton(preferences.text("Notifications are off in System Settings", "Las notificaciones están desactivadas en Ajustes")) {
+                        system.openNotificationSettings()
+                    }
+                }
+            }
             group { claudeRow }
         }
+        .onAppear { system.refresh() }
+    }
+
+    private func noteButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: "arrow.up.forward.app")
+                .font(.system(size: 11)).foregroundStyle(.orange)
+        }
+        .buttonStyle(.plain)
     }
 
     /// Optional: the status line bridge updates Claude instantly after each

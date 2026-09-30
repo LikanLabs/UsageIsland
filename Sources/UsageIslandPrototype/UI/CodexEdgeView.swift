@@ -7,7 +7,7 @@ enum CodexEdgeLayout {
     // Keep the bridge close to the notch's roughly 32–38pt safe-area height.
     static let topHeight: CGFloat = 36
     static let detailWidth: CGFloat = 324
-    static let detailHeight: CGFloat = 412
+    static let detailHeight: CGFloat = 504
     static let gap: CGFloat = 8
 
     static let panelPadding: CGFloat = 18
@@ -121,21 +121,42 @@ struct CodexEdgeView: View {
         }
     }
 
-    @ViewBuilder
     private var pillContent: some View {
-        if atNotch {
-            HStack(spacing: 7) {
-                logoRing(size: 24, lineWidth: 2.5)
-                percentage.font(.system(size: 15, weight: .semibold, design: .rounded))
-                Text(periodLabel).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-            }
-        } else {
-            VStack(spacing: 4) {
-                logoRing(size: 42, lineWidth: 3)
-                percentage.font(.system(size: 18, weight: .semibold, design: .rounded))
-                Text(periodLabel).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+        // Ticks so a countdown to the reset stays current.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let countdown = resetCountdown(now: context.date)
+            let value = Text(countdown ?? headlineText).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
+            let caption = Text(countdown == nil ? periodLabel : preferences.text("until reset", "para reinicio"))
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            if atNotch {
+                HStack(spacing: 7) {
+                    logoRing(size: 24, lineWidth: 2.5)
+                    value.font(.system(size: 15, weight: .semibold, design: .rounded))
+                    caption
+                }
+            } else {
+                VStack(spacing: 4) {
+                    logoRing(size: 42, lineWidth: 3)
+                    value.font(.system(size: countdown == nil ? 18 : 15, weight: .semibold, design: .rounded))
+                    caption
+                }
+                .padding(.horizontal, 4)
             }
         }
+    }
+
+    /// When the shown limit is used up, the useful number is how long until
+    /// it resets, not "0%".
+    private func resetCountdown(now: Date) -> String? {
+        guard let snapshot, let used = headlineUsed, used >= 100,
+              let resetsAt = snapshot.preferredWindow.resetsAt, resetsAt > now else { return nil }
+        return CodexEdgeText.countdown(until: resetsAt, now: now)
+    }
+
+    private var headlineText: String {
+        headlineUsed.map { "\(displayPercent($0))%" } ?? "—"
     }
 
     /// Usage shown in the pill. A stale reading whose window already reset
@@ -146,9 +167,6 @@ struct CodexEdgeView: View {
         return snapshot.preferredWindow.usedPercent
     }
 
-    private var percentage: some View {
-        Text(headlineUsed.map { "\(displayPercent($0))%" } ?? "—").monospacedDigit()
-    }
 
     private func logoRing(size: CGFloat, lineWidth: CGFloat) -> some View {
         ZStack {
@@ -166,6 +184,9 @@ struct CodexEdgeView: View {
         let prefix = preferences.text("\(provider.displayName) usage, ", "Consumo de \(provider.displayName), ")
         guard snapshot != nil else { return prefix + preferences.text("unavailable", "no disponible") }
         guard let used = headlineUsed else { return prefix + preferences.text("reset pending", "reinicio pendiente") }
+        if let countdown = resetCountdown(now: Date()) {
+            return prefix + preferences.text("limit reached, resets in \(countdown)", "límite alcanzado, reinicia en \(countdown)")
+        }
         let amount = "\(displayPercent(used))% " + percentLabel
         return prefix + amount + ", " + periodLabel
     }
@@ -204,7 +225,10 @@ private struct UsageRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(IslandPalette.track, lineWidth: lineWidth)
+            // A used-up limit tints the whole track red, so "0 % left" never
+            // reads as an empty, neutral ring.
+            Circle().stroke(used.map { $0 >= 100 } == true ? IslandPalette.level(100).opacity(0.5) : IslandPalette.track,
+                            lineWidth: lineWidth)
             if let used {
                 Circle().trim(from: 0, to: CGFloat(showsConsumed ? used : 100 - used) / 100)
                     .stroke(IslandPalette.level(used),
@@ -240,6 +264,7 @@ struct CodexPanelContent: View {
     @ObservedObject var displayScale: EdgeDisplayScale
     @ObservedObject var navigation: EdgePanelNavigation
     @ObservedObject var claude: ClaudeConnection
+    @ObservedObject var system: SystemIntegration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onClose: () -> Void
 
@@ -253,7 +278,7 @@ struct CodexPanelContent: View {
             header
             ZStack(alignment: .topLeading) {
                 if navigation.showsSettings {
-                    AppearanceSettingsView(preferences: preferences, claude: claude)
+                    AppearanceSettingsView(preferences: preferences, claude: claude, system: system)
                         .transition(pageTransition(forward: true))
                 } else {
                     CodexUsageDetailView(model: model, preferences: preferences)
@@ -527,6 +552,14 @@ enum CodexEdgeText {
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    /// Compact time left: "45 min", "1h 20m", "2d 4h".
+    static func countdown(until date: Date, now: Date) -> String {
+        let minutes = max(1, Int(ceil(date.timeIntervalSince(now) / 60)))
+        if minutes < 60 { return "\(minutes) min" }
+        if minutes < 1_440 { return "\(minutes / 60)h \(minutes % 60)m" }
+        return "\(minutes / 1_440)d \(minutes % 1_440 / 60)h"
     }
 
     static func pillPeriod(_ durationMinutes: Int, preferences: AppPreferences) -> String {

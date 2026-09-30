@@ -38,6 +38,12 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
   conservación del último dato válido marcado como antiguo. Un dato antiguo cuyo
   reinicio ya pasó se muestra como «—».
 
+- 30 de septiembre: abrir al iniciar sesión (opcional), avisos locales al
+  20/10/0 % y al reiniciarse un límite bajo, cuenta regresiva en la pill al
+  agotarse, reapertura automática tras `brew upgrade`, pausa con pantalla
+  bloqueada o apagada y modo de bajo consumo, barra de Claude tolerante a
+  desinstalación.
+
 ## Archivos relevantes
 
 Rutas relativas a `Sources/UsageIslandPrototype/`:

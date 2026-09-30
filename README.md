@@ -72,8 +72,8 @@ brew update
 brew upgrade --cask usage-island
 ```
 
-Then quit Usage Island (right-click the pill → **Quit**) and open it again, so
-the new version starts.
+Usage Island notices the new version within a minute and reopens on it by
+itself (it waits if the panel is open).
 
 ## Use
 
@@ -81,7 +81,7 @@ the new version starts.
 | --- | --- |
 | Click the pill | Opens the panel with every tool's usage and refreshes it |
 | Refresh button | Updates now |
-| Gear | Settings: position, auto-hide, available or used %, language, size, Claude in terminal |
+| Gear | Settings: position, auto-hide, available or used %, language, size, open at login, alerts, Claude in terminal |
 | Right-click the pill | Refresh or quit |
 | Escape or click outside | Closes the panel |
 
@@ -91,7 +91,21 @@ orange above 10 %, red below.
 
 **Which tool the pill shows.** The one you used most recently: Claude as soon
 as Claude Code reports new usage, and Codex when its usage rises. When nothing
-has changed since launch, it shows the tool with the least quota left.
+has changed since launch, it shows the tool with the least quota left. The
+pill shows one limit and names it: **5 hours** when the plan has that window,
+otherwise **weekly**. When that limit is used up, it shows the time left until
+it resets instead of "0%".
+
+**Alerts.** With **Alert when running low** on (the default), you get a macOS
+notification when a limit drops to 20 %, 10 % and 0 % left, and when a limit
+that had run low resets. Alerts are local; nothing is sent anywhere.
+
+**Open at login.** Turn it on in settings so Usage Island starts after a
+restart.
+
+**Battery.** Polling pauses while the screen is locked or the displays sleep,
+and slows down in Low Power Mode. The Claude query runs with Claude Code's
+update checks and non-essential traffic turned off.
 
 **Old readings.** If a refresh fails, the last value stays on screen with a
 dashed ring and a "last known usage" note; it is never replaced by a made-up

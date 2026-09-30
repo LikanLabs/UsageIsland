@@ -36,6 +36,10 @@ final class AppPreferences: ObservableObject {
     @Published var showsConsumedPercent: Bool {
         didSet { defaults.set(showsConsumedPercent, forKey: "appearance.showsConsumedPercent") }
     }
+    /// Notify at 20 %, 10 % and 0 % remaining, and when a low window resets.
+    @Published var usageAlerts: Bool {
+        didSet { defaults.set(usageAlerts, forKey: "alerts.usage") }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -44,6 +48,7 @@ final class AppPreferences: ObservableObject {
         position = EdgePosition(rawValue: defaults.string(forKey: "appearance.position") ?? "") ?? .right
         autoHide = defaults.bool(forKey: "appearance.autoHide")
         showsConsumedPercent = defaults.object(forKey: "appearance.showsConsumedPercent") as? Bool ?? true
+        usageAlerts = defaults.object(forKey: "alerts.usage") as? Bool ?? true
     }
 
     var isSpanish: Bool {
