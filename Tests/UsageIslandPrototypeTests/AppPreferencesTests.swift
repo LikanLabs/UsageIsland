@@ -41,3 +41,37 @@ final class AppPreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.scale, 1)
     }
 }
+
+@MainActor
+final class OnboardingPreferenceTests: XCTestCase {
+    func testNewInstallShowsWelcomeAndAvailablePercent() throws {
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertFalse(preferences.hasCompletedOnboarding)
+        XCTAssertFalse(preferences.showsConsumedPercent, "new installs show what is left")
+        XCTAssertTrue(preferences.usageAlerts)
+
+        preferences.hasCompletedOnboarding = true
+        XCTAssertTrue(AppPreferences(defaults: defaults).hasCompletedOnboarding)
+    }
+
+    func testPeopleUpgradingNeverSeeTheWelcome() throws {
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("top", forKey: "appearance.position")
+        XCTAssertTrue(AppPreferences(defaults: defaults).hasCompletedOnboarding)
+    }
+
+    func testExistingChoiceOfPercentIsKept() throws {
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "appearance.showsConsumedPercent")
+        XCTAssertTrue(AppPreferences(defaults: defaults).showsConsumedPercent)
+    }
+
+    private func makeDefaults() throws -> (UserDefaults, String) {
+        let suite = "UsageIsland.onboarding.tests.\(UUID())"
+        return (try XCTUnwrap(UserDefaults(suiteName: suite)), suite)
+    }
+}

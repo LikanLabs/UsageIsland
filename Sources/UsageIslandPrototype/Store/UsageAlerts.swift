@@ -108,10 +108,16 @@ final class UsageAlertMonitor {
                 MainActor.assumeIsolated { self?.evaluate(snapshots) }
             }
             .store(in: &subscriptions)
+        // Ask for permission when alerts are on, but not before the welcome
+        // page has explained why; it asks itself when the user finishes it.
         preferences.$usageAlerts
             .removeDuplicates()
-            .sink { [notifier] enabled in
-                if enabled { Task { _ = await notifier.requestAuthorization() } }
+            .sink { [weak self] enabled in
+                MainActor.assumeIsolated {
+                    guard let self, enabled, self.preferences.hasCompletedOnboarding else { return }
+                    let notifier = self.notifier
+                    Task { _ = await notifier.requestAuthorization() }
+                }
             }
             .store(in: &subscriptions)
     }

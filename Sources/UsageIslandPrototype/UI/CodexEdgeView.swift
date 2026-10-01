@@ -53,10 +53,15 @@ enum CodexEdgeLayout {
             + (snapshot.freshness == .stale ? staleNoteHeight : 0)
     }
 
+    static let welcomeCardHeight: CGFloat = 146
+
     @MainActor
     static func panelHeight(settings: Bool, model: AppModel) -> CGFloat {
         if settings { return detailHeight }
-        let providers = model.configuredProviderIDs
+        let providers = model.visibleProviderIDs
+        guard !providers.isEmpty else {
+            return panelPadding * 2 + headerHeight + 14 + welcomeCardHeight + footerHeight
+        }
         let cards = providers.reduce(CGFloat(0)) { $0 + cardHeight(provider: $1, snapshot: model.snapshot(for: $1)) }
         let spacing = CGFloat(max(providers.count - 1, 0)) * cardSpacing
         return panelPadding * 2 + headerHeight + 14 + cards + spacing + footerHeight
@@ -92,7 +97,7 @@ struct CodexEdgeView: View {
     var onOpen: () -> Void
     /// The pill follows the provider in use; the panel shows all of them.
     private var snapshot: UsageSnapshot? { model.displayedSnapshot }
-    private var provider: ProviderID { model.displayedProviderID ?? .codex }
+    private var provider: ProviderID { model.pillProviderID ?? .codex }
     private var atNotch: Bool { preferences.position == .top }
 
     var body: some View {
@@ -263,13 +268,12 @@ struct CodexPanelContent: View {
     @ObservedObject var preferences: AppPreferences
     @ObservedObject var displayScale: EdgeDisplayScale
     @ObservedObject var navigation: EdgePanelNavigation
-    @ObservedObject var claude: ClaudeConnection
     @ObservedObject var system: SystemIntegration
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onClose: () -> Void
 
     private var height: CGFloat {
-        CodexEdgeLayout.panelHeight(settings: navigation.showsSettings, model: model)
+        CodexEdgeLayout.panelHeight(settings: navigation.showsSettings || navigation.showsWelcome, model: model)
     }
     private let panelShape = RoundedRectangle(cornerRadius: 26, style: .continuous)
 
@@ -277,8 +281,13 @@ struct CodexPanelContent: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             ZStack(alignment: .topLeading) {
-                if navigation.showsSettings {
-                    AppearanceSettingsView(preferences: preferences, claude: claude, system: system)
+                if navigation.showsWelcome {
+                    WelcomeView(model: model, preferences: preferences, system: system) {
+                        navigation.showsWelcome = false
+                    }
+                    .transition(pageTransition(forward: false))
+                } else if navigation.showsSettings {
+                    AppearanceSettingsView(preferences: preferences, system: system)
                         .transition(pageTransition(forward: true))
                 } else {
                     CodexUsageDetailView(model: model, preferences: preferences)
@@ -294,6 +303,7 @@ struct CodexPanelContent: View {
         .environment(\.colorScheme, .dark)
         .environment(\.locale, preferences.locale)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: navigation.showsSettings)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: navigation.showsWelcome)
         // A stable transparent host lets SwiftUI animate the actual surface
         // without fighting AppKit window resizing. At the notch it stays top-aligned.
         .frame(height: CodexEdgeLayout.envelopeHeight(model: model),
@@ -305,7 +315,10 @@ struct CodexPanelContent: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if navigation.showsSettings {
+            if navigation.showsWelcome {
+                Text(preferences.text("Welcome to Usage Island", "Bienvenido a Usage Island"))
+                    .font(.system(size: 17, weight: .semibold))
+            } else if navigation.showsSettings {
                 Button { navigation.showsSettings = false } label: {
                     Image(systemName: "chevron.left").frame(width: 28, height: 28)
                 }
@@ -325,7 +338,7 @@ struct CodexPanelContent: View {
                 }
             }
             Spacer(minLength: 0)
-            if !navigation.showsSettings {
+            if !navigation.showsSettings, !navigation.showsWelcome {
                 iconButton("arrow.clockwise", label: preferences.text("Refresh usage", "Actualizar consumo")) {
                     Task { await model.refreshUsage() }
                 }
@@ -359,23 +372,29 @@ struct CodexUsageDetailView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var preferences: AppPreferences = .shared
 
-    private var providers: [ProviderID] { model.configuredProviderIDs }
+    private var providers: [ProviderID] { model.visibleProviderIDs }
 
     var body: some View {
         VStack(alignment: .leading, spacing: CodexEdgeLayout.cardSpacing) {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                VStack(spacing: CodexEdgeLayout.cardSpacing) {
-                    ForEach(providers) { provider in
-                        card(provider, now: context.date)
+            if providers.isEmpty {
+                welcomeCard
+            } else {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    VStack(spacing: CodexEdgeLayout.cardSpacing) {
+                        ForEach(providers) { provider in
+                            card(provider, now: context.date)
+                        }
                     }
                 }
             }
             Spacer(minLength: 0)
-            Text(preferences.showsConsumedPercent
-                 ? preferences.text("Quota used", "Cuota usada")
-                 : preferences.text("Quota available", "Cuota disponible"))
-                .font(.system(size: 11)).foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity)
+            if !providers.isEmpty {
+                Text(preferences.showsConsumedPercent
+                     ? preferences.text("Quota used", "Cuota usada")
+                     : preferences.text("Quota available", "Cuota disponible"))
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
 
@@ -440,6 +459,33 @@ struct CodexUsageDetailView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: CodexEdgeLayout.cardHeight(provider: provider, snapshot: snapshot), alignment: .top)
+        .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
+    }
+
+    /// Shown when neither CLI is installed: what the app needs, in one card.
+    private var welcomeCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(preferences.text("Install Codex or Claude Code", "Instala Codex o Claude Code"))
+                .font(.system(size: 14, weight: .semibold))
+            Text(preferences.text(
+                "Usage Island shows the plan limits of the Codex CLI and Claude Code. Install either one and sign in with your subscription; the app finds it by itself.",
+                "Usage Island muestra los límites de tu plan en Codex CLI y Claude Code. Instala cualquiera de los dos e inicia sesión con tu suscripción; la app lo detecta sola."))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 14) {
+                Link(destination: URL(string: "https://github.com/openai/codex")!) {
+                    Label("Codex CLI", systemImage: "arrow.up.forward")
+                }
+                Link(destination: URL(string: "https://code.claude.com/docs")!) {
+                    Label("Claude Code", systemImage: "arrow.up.forward")
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: CodexEdgeLayout.welcomeCardHeight, alignment: .top)
         .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
     }

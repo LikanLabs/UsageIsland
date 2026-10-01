@@ -40,6 +40,11 @@ final class AppPreferences: ObservableObject {
     @Published var usageAlerts: Bool {
         didSet { defaults.set(usageAlerts, forKey: "alerts.usage") }
     }
+    /// The welcome page runs once. People upgrading from a version without
+    /// it already set the app up, so they never see it.
+    @Published var hasCompletedOnboarding: Bool {
+        didSet { defaults.set(hasCompletedOnboarding, forKey: "onboarding.completed") }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -47,8 +52,13 @@ final class AppPreferences: ObservableObject {
         language = AppLanguage(rawValue: defaults.string(forKey: "appearance.language") ?? "") ?? .system
         position = EdgePosition(rawValue: defaults.string(forKey: "appearance.position") ?? "") ?? .right
         autoHide = defaults.bool(forKey: "appearance.autoHide")
-        showsConsumedPercent = defaults.object(forKey: "appearance.showsConsumedPercent") as? Bool ?? true
+        // New installs show what is left, matching the ring and the alerts.
+        showsConsumedPercent = defaults.object(forKey: "appearance.showsConsumedPercent") as? Bool ?? false
         usageAlerts = defaults.object(forKey: "alerts.usage") as? Bool ?? true
+        let existingInstall = ["appearance.scale", "appearance.language", "appearance.position",
+                               "appearance.autoHide", "appearance.showsConsumedPercent", "alerts.usage"]
+            .contains { defaults.object(forKey: $0) != nil }
+        hasCompletedOnboarding = defaults.object(forKey: "onboarding.completed") as? Bool ?? existingInstall
     }
 
     var isSpanish: Bool {

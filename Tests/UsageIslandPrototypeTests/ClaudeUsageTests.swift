@@ -2,193 +2,6 @@ import Foundation
 import XCTest
 @testable import UsageIslandPrototype
 
-/// Synthetic Claude Code status line input: the documented shape, with
-/// unrelated fields that must never be stored.
-private let statusLineInput = Data("""
-{
-  "session_id": "synthetic-session",
-  "cwd": "/Users/example/project",
-  "model": { "id": "claude-synthetic", "display_name": "Synthetic" },
-  "cost": { "total_cost_usd": 1.23 },
-  "rate_limits": {
-    "five_hour": { "used_percentage": 32.4, "resets_at": 1700003600 },
-    "seven_day": { "used_percentage": 57.6, "resets_at": 1700500000 }
-  }
-}
-""".utf8)
-
-final class ClaudeStatuslineBridgeTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_700_000_000)
-
-    func testBridgeStoresOnlyRateLimitsAndPrintsShortStatus() throws {
-        let url = try temporaryDirectory().appendingPathComponent("record.json")
-        let text = ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
-
-        XCTAssertEqual(text, "5h 32% · 7d 58%")
-        let stored = try String(contentsOf: url, encoding: .utf8)
-        for private_ in ["synthetic-session", "/Users/example", "claude-synthetic", "total_cost"] {
-            XCTAssertFalse(stored.contains(private_), private_)
-        }
-        let record = try JSONDecoder().decode(ClaudeRateLimitRecord.self, from: Data(stored.utf8))
-        XCTAssertEqual(record.capturedAt, now.timeIntervalSince1970)
-        XCTAssertEqual(record.fiveHour, .init(usedPercentage: 32.4, resetsAt: 1_700_003_600))
-        XCTAssertEqual(record.sevenDay, .init(usedPercentage: 57.6, resetsAt: 1_700_500_000))
-    }
-
-    func testInputWithoutRateLimitsKeepsPreviousRecord() throws {
-        let url = try temporaryDirectory().appendingPathComponent("record.json")
-        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
-        let before = try Data(contentsOf: url)
-
-        for input in [#"{"session_id":"x"}"#, #"{"rate_limits":{}}"#, "not json", ""] {
-            XCTAssertEqual(ClaudeStatuslineBridge.run(input: Data(input.utf8), recordURL: url, now: now.addingTimeInterval(60)), "")
-        }
-        XCTAssertEqual(try Data(contentsOf: url), before)
-    }
-
-    func testPartialLimitsKeepAvailableWindow() {
-        let input = Data(#"{"rate_limits":{"seven_day":{"used_percentage":99.6,"resets_at":1700500000}}}"#.utf8)
-        let record = ClaudeStatuslineBridge.record(from: input, now: now)
-        XCTAssertNil(record?.fiveHour)
-        XCTAssertEqual(record.map(ClaudeStatuslineBridge.statusText), "7d 99%")
-    }
-}
-
-final class ClaudeUsageProviderTests: XCTestCase {
-    private let now = Date(timeIntervalSince1970: 1_700_000_000)
-
-    func testRecordMapsToSessionAndWeeklyWindows() throws {
-        let record = ClaudeRateLimitRecord(
-            version: 1, capturedAt: now.timeIntervalSince1970,
-            fiveHour: .init(usedPercentage: 32.4, resetsAt: 1_700_003_600),
-            sevenDay: .init(usedPercentage: 99.5, resetsAt: 1_700_500_000)
-        )
-        let snapshot = try ClaudeUsageProvider.snapshot(from: record, now: now, freshnessInterval: 900)
-
-        XCTAssertEqual(snapshot.id, .claude)
-        XCTAssertEqual(snapshot.preferredWindow.durationMinutes, 300)
-        XCTAssertEqual(snapshot.preferredWindow.usedPercent, 32)
-        XCTAssertEqual(snapshot.preferredWindow.resetsAt, Date(timeIntervalSince1970: 1_700_003_600))
-        XCTAssertEqual(snapshot.weeklyUsedPercent, 99)
-        XCTAssertEqual(snapshot.freshness, .fresh)
-        XCTAssertEqual(snapshot.lastActivityAt, now)
-        XCTAssertEqual(snapshot.capturedAt, now)
-    }
-
-    func testOldRecordIsStale() throws {
-        let record = ClaudeRateLimitRecord(
-            version: 1, capturedAt: now.timeIntervalSince1970 - 901,
-            fiveHour: .init(usedPercentage: 10, resetsAt: 1_700_003_600), sevenDay: nil
-        )
-        let snapshot = try ClaudeUsageProvider.snapshot(from: record, now: now, freshnessInterval: 900)
-        XCTAssertEqual(snapshot.freshness, .stale)
-        XCTAssertEqual(snapshot.windows.count, 1)
-    }
-
-    func testMissingOrInvalidRecordsFailWithoutInventingUsage() async throws {
-        let directory = try temporaryDirectory()
-        let missing = ClaudeUsageProvider(recordURL: directory.appendingPathComponent("none.json"), clock: FixedClaudeClock(now))
-        await assertThrows(ClaudeUsageError.cliNotFound) { try await missing.fetchUsage() }
-
-        let bad = directory.appendingPathComponent("bad.json")
-        try Data(#"{"version":2,"capturedAt":1,"fiveHour":null,"sevenDay":null}"#.utf8).write(to: bad)
-        let invalid = ClaudeUsageProvider(recordURL: bad, clock: FixedClaudeClock(now))
-        await assertThrows(ClaudeUsageError.invalidRecord) { try await invalid.fetchUsage() }
-    }
-
-    func testBridgeOutputIsReadByProvider() async throws {
-        let url = try temporaryDirectory().appendingPathComponent("record.json")
-        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
-        let snapshot = try await ClaudeUsageProvider(recordURL: url, clock: FixedClaudeClock(now)).fetchUsage()
-        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [32, 58])
-    }
-}
-
-final class ClaudeSettingsInstallerTests: XCTestCase {
-    private let executable = "/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype"
-
-    func testMissingClaudeDirectoryIsReportedAndNeverCreated() throws {
-        let directory = try temporaryDirectory().appendingPathComponent(".claude")
-        let installer = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable)
-        XCTAssertEqual(installer.status(), .claudeNotFound)
-        XCTAssertThrowsError(try installer.install())
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-    }
-
-    func testInstallPreservesOtherSettingsAndUninstallRemovesOnlyTheBridge() throws {
-        let directory = try temporaryDirectory()
-        let installer = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable)
-        try Data(#"{"model":"opus","permissions":{"allow":["Bash(ls)"]}}"#.utf8).write(to: installer.settingsURL)
-        XCTAssertEqual(installer.status(), .notInstalled)
-
-        try installer.install()
-        XCTAssertEqual(installer.status(), .installed)
-        var settings = try readJSON(installer.settingsURL)
-        XCTAssertEqual(settings["model"] as? String, "opus")
-        XCTAssertNotNil(settings["permissions"])
-        let statusLine = try XCTUnwrap(settings["statusLine"] as? [String: Any])
-        XCTAssertEqual(statusLine["type"] as? String, "command")
-        XCTAssertEqual(
-            statusLine["command"] as? String,
-            "[ -x '/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype' ] && exec '/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype' --claude-statusline || true"
-        )
-
-        try installer.uninstall()
-        settings = try readJSON(installer.settingsURL)
-        XCTAssertNil(settings["statusLine"])
-        XCTAssertEqual(settings["model"] as? String, "opus")
-        XCTAssertEqual(installer.status(), .notInstalled)
-    }
-
-    func testCustomStatusLineIsNeverReplacedOrRemoved() throws {
-        let directory = try temporaryDirectory()
-        let installer = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable)
-        let original = Data(#"{"statusLine":{"type":"command","command":"~/bin/my-status"}}"#.utf8)
-        try original.write(to: installer.settingsURL)
-
-        XCTAssertEqual(installer.status(), .otherStatusLine)
-        XCTAssertThrowsError(try installer.install()) { XCTAssertEqual($0 as? ClaudeSettingsError, .otherStatusLine) }
-        XCTAssertThrowsError(try installer.uninstall()) { XCTAssertEqual($0 as? ClaudeSettingsError, .otherStatusLine) }
-        XCTAssertEqual(try Data(contentsOf: installer.settingsURL), original)
-    }
-
-    func testUnreadableSettingsAreLeftUntouched() throws {
-        let directory = try temporaryDirectory()
-        let installer = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable)
-        let original = Data("{ not json".utf8)
-        try original.write(to: installer.settingsURL)
-        XCTAssertEqual(installer.status(), .unreadableSettings)
-        XCTAssertThrowsError(try installer.install())
-        XCTAssertEqual(try Data(contentsOf: installer.settingsURL), original)
-    }
-
-    func testRepairPointsBridgeAtThisAppOnlyWhenTheOldExecutableIsGone() throws {
-        let directory = try temporaryDirectory()
-        let old = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: "/Old/Usage Island.app/Contents/MacOS/UsageIslandPrototype")
-        try old.install()
-
-        let present = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable, executableExists: { _ in true })
-        present.repairIfNeeded()
-        XCTAssertEqual(try command(in: directory), old.command)
-
-        let moved = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: executable, executableExists: { _ in false })
-        moved.repairIfNeeded()
-        XCTAssertEqual(try command(in: directory), moved.command)
-    }
-
-    func testShellQuotingRoundTripsApostrophes() {
-        let path = "/Users/o'neil/Apps/Usage Island.app/Contents/MacOS/UsageIslandPrototype"
-        let installer = ClaudeSettingsInstaller(claudeDirectory: URL(fileURLWithPath: "/tmp"), executablePath: path)
-        XCTAssertEqual(ClaudeSettingsInstaller.executablePath(inCommand: installer.command), path)
-        XCTAssertTrue(ClaudeSettingsInstaller.isBridge(["command": installer.command]))
-    }
-
-    private func command(in directory: URL) throws -> String? {
-        let settings = try readJSON(directory.appendingPathComponent("settings.json"))
-        return (settings["statusLine"] as? [String: Any])?["command"] as? String
-    }
-}
-
 @MainActor
 final class ActiveProviderTests: XCTestCase {
     private let launch = Date(timeIntervalSince1970: 1_700_000_000)
@@ -372,7 +185,6 @@ final class ClaudeUsageResponseParserTests: XCTestCase {
     func testScopedLimitBecomesItsOwnWindow() async throws {
         let query = ScriptedUsageQuery(output: scopedUsageOutput)
         let provider = ClaudeUsageProvider(
-            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
             clock: FixedClaudeClock(Date(timeIntervalSince1970: 1_700_000_000)),
             makeQuery: { query }
         )
@@ -408,21 +220,16 @@ final class ClaudeUsageResponseParserTests: XCTestCase {
     }
 }
 
-final class ClaudeCombinedSourceTests: XCTestCase {
+final class ClaudeCLIProviderTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
-    func testCLIAnswerCoversUsageWithoutTheBridge() async throws {
-        let directory = try temporaryDirectory()
+    func testCLIAnswerBecomesTheSnapshot() async throws {
         let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
-        let provider = ClaudeUsageProvider(
-            recordURL: directory.appendingPathComponent("none.json"),
-            clock: FixedClaudeClock(now),
-            makeQuery: { query }
-        )
+        let provider = ClaudeUsageProvider(clock: FixedClaudeClock(now), makeQuery: { query })
         let snapshot = try await provider.fetchUsage()
         XCTAssertEqual(snapshot.windows.map(\.usedPercent), [27, 4])
         XCTAssertEqual(snapshot.freshness, .fresh)
-        XCTAssertNil(snapshot.lastActivityAt)
+        XCTAssertNil(snapshot.lastActivityAt, "activity comes from rising usage, as with Codex")
         let calls = await query.calls
         XCTAssertEqual(calls, 1)
     }
@@ -430,10 +237,7 @@ final class ClaudeCombinedSourceTests: XCTestCase {
     func testCLIIsQueriedAtMostOncePerInterval() async throws {
         let clock = SteppingClaudeClock(now)
         let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
-        let provider = ClaudeUsageProvider(
-            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
-            clock: clock, queryInterval: 120, makeQuery: { query }
-        )
+        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 120, makeQuery: { query })
         _ = try await provider.fetchUsage()
         clock.advance(60)
         _ = try await provider.fetchUsage()
@@ -445,35 +249,77 @@ final class ClaudeCombinedSourceTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
-    func testNewestSourceWinsAndBridgeTimeIsActivity() async throws {
+    func testOldAnswerTurnsStaleAndFailuresKeepTheLastReading() async throws {
         let clock = SteppingClaudeClock(now)
-        let url = try temporaryDirectory().appendingPathComponent("record.json")
         let query = ScriptedUsageQuery(output: usageOutput(five: 27, week: 4))
-        let provider = ClaudeUsageProvider(recordURL: url, clock: clock, queryInterval: 120, makeQuery: { query })
+        let provider = ClaudeUsageProvider(clock: clock, freshnessInterval: 900, queryInterval: 120, makeQuery: { query })
+        _ = try await provider.fetchUsage()
 
-        _ = try await provider.fetchUsage()  // CLI answer at `now`
-        clock.advance(30)
-        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: clock.now())
-        var snapshot = try await provider.fetchUsage()
-        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [32, 58], "newer bridge record wins")
-        XCTAssertEqual(snapshot.lastActivityAt, clock.now())
-
-        clock.advance(120)
-        await query.set(usageOutput(five: 40, week: 60))
-        snapshot = try await provider.fetchUsage()
-        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [40, 60], "newer CLI answer wins")
-        XCTAssertEqual(snapshot.lastActivityAt, now.addingTimeInterval(30), "activity still comes from the bridge")
+        await query.set(Data("garbage".utf8))
+        clock.advance(901)
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [27, 4], "last valid answer is kept")
+        XCTAssertEqual(snapshot.freshness, .stale)
     }
 
-    func testFailingCLIFallsBackToBridgeOrFails() async throws {
-        let url = try temporaryDirectory().appendingPathComponent("record.json")
-        let query = ScriptedUsageQuery(output: Data("garbage".utf8))
-        let provider = ClaudeUsageProvider(recordURL: url, clock: FixedClaudeClock(now), makeQuery: { query })
-        await assertThrows(ClaudeUsageError.queryFailed) { _ = try await provider.fetchUsage() }
+    func testMissingCLIOrBadAnswerExplainsWhy() async throws {
+        let missing = ClaudeUsageProvider(clock: FixedClaudeClock(now))
+        await assertThrows(ClaudeUsageError.cliNotFound) { _ = try await missing.fetchUsage() }
 
-        ClaudeStatuslineBridge.run(input: statusLineInput, recordURL: url, now: now)
-        let snapshot = try await provider.fetchUsage()
-        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [32, 58])
+        let query = ScriptedUsageQuery(output: Data("garbage".utf8))
+        let broken = ClaudeUsageProvider(clock: FixedClaudeClock(now), makeQuery: { query })
+        await assertThrows(ClaudeUsageError.queryFailed) { _ = try await broken.fetchUsage() }
+    }
+}
+
+final class ClaudeLegacyBridgeCleanupTests: XCTestCase {
+    private let path = "/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype"
+
+    func testRemovesOnlyOurStatusLineInBothOldFormatsAndItsRecord() throws {
+        for command in ["'\(path)' --claude-statusline",
+                        "[ -x '\(path)' ] && exec '\(path)' --claude-statusline || true"] {
+            let directory = try temporaryDirectory()
+            let file = ClaudeSettingsFile(claudeDirectory: directory)
+            let settings: [String: Any] = ["model": "opus", "statusLine": ["type": "command", "command": command, "padding": 0]]
+            try JSONSerialization.data(withJSONObject: settings).write(to: file.settingsURL)
+            let recordDirectory = try temporaryDirectory()
+            let record = recordDirectory.appendingPathComponent("claude-rate-limits.json")
+            try Data("{}".utf8).write(to: record)
+
+            XCTAssertTrue(ClaudeLegacyBridge.removeIfInstalled(settings: file, recordURL: record))
+
+            let updated = try readJSON(file.settingsURL)
+            XCTAssertNil(updated["statusLine"])
+            XCTAssertEqual(updated["model"] as? String, "opus")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: record.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: recordDirectory.path), "empty folder removed")
+        }
+    }
+
+    func testNeverTouchesAUsersOwnStatusLineOrUnreadableSettings() throws {
+        for original in [#"{"statusLine":{"type":"command","command":"~/bin/my-status"}}"#,
+                         #"{"statusLine":{"type":"command","command":"'/usr/bin/other' --claude-statusline"}}"#,
+                         "{ not json"] {
+            let directory = try temporaryDirectory()
+            let file = ClaudeSettingsFile(claudeDirectory: directory)
+            try Data(original.utf8).write(to: file.settingsURL)
+            XCTAssertFalse(ClaudeLegacyBridge.removeIfInstalled(settings: file, recordURL: directory.appendingPathComponent("none.json")))
+            XCTAssertEqual(try String(contentsOf: file.settingsURL, encoding: .utf8), original)
+        }
+    }
+
+    func testMissingClaudeSetupIsANoOp() throws {
+        let directory = try temporaryDirectory().appendingPathComponent(".claude")
+        XCTAssertFalse(ClaudeLegacyBridge.removeIfInstalled(settings: ClaudeSettingsFile(claudeDirectory: directory),
+                                                            recordURL: directory.appendingPathComponent("none.json")))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testTamperedCommandsAreNotOurs() {
+        XCTAssertNil(ClaudeSettingsFile.executablePath(inCommand: "[ -x '/a/UsageIslandPrototype' ] && exec '/b/UsageIslandPrototype' --claude-statusline || true"))
+        XCTAssertNil(ClaudeSettingsFile.executablePath(inCommand: "'/a/UsageIslandPrototype'; rm -rf x' --claude-statusline"))
+        XCTAssertEqual(ClaudeSettingsFile.executablePath(inCommand: "'/Users/o'\\''neil/UsageIslandPrototype' --claude-statusline"),
+                       "/Users/o'neil/UsageIslandPrototype")
     }
 }
 
@@ -483,10 +329,7 @@ final class ClaudeDesktopActivityTests: XCTestCase {
         let launch = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = SteppingClaudeClock(launch)
         let query = ScriptedUsageQuery(output: usageOutput(five: 10, week: 5))
-        let claude = ClaudeUsageProvider(
-            recordURL: try temporaryDirectory().appendingPathComponent("none.json"),
-            clock: clock, queryInterval: 0, makeQuery: { query }
-        )
+        let claude = ClaudeUsageProvider(clock: clock, queryInterval: 0, makeQuery: { query })
         let codex = ScriptedUsageProvider(id: .codex)
         await codex.set(try UsageSnapshot(
             provider: .codex,
@@ -517,10 +360,8 @@ private actor ScriptedUsageQuery: ClaudeUsageQuerying {
 
 final class ProviderIssueTests: XCTestCase {
     func testClaudeReportsWhyThereIsNoReading() async throws {
-        let directory = try temporaryDirectory()
         let apiKey = ScriptedUsageQuery(output: Data(#"{"type":"control_response","response":{"subtype":"success","request_id":"usage-island","response":{"rate_limits_available":false,"rate_limits":null}}}"#.utf8))
         let provider = ClaudeUsageProvider(
-            recordURL: directory.appendingPathComponent("none.json"),
             clock: FixedClaudeClock(Date(timeIntervalSince1970: 1_700_000_000)),
             makeQuery: { apiKey }
         )

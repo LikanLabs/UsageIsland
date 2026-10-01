@@ -168,38 +168,7 @@ final class AppUpdateRelaunchTests: XCTestCase {
     }
 }
 
-final class ClaudeBridgeCommandTests: XCTestCase {
-    private let path = "/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype"
-
-    func testGuardedCommandRoundTripsAndStillParsesTheOriginalFormat() {
-        let installer = ClaudeSettingsInstaller(claudeDirectory: URL(fileURLWithPath: "/tmp"), executablePath: path)
-        XCTAssertEqual(ClaudeSettingsInstaller.executablePath(inCommand: installer.command), path)
-        XCTAssertEqual(ClaudeSettingsInstaller.executablePath(inCommand: "'\(path)' --claude-statusline"), path)
-        XCTAssertTrue(ClaudeSettingsInstaller.isBridge(["command": installer.command]))
-        XCTAssertTrue(ClaudeSettingsInstaller.isBridge(["command": "'\(path)' --claude-statusline"]))
-    }
-
-    func testForeignOrTamperedCommandsAreNotOurs() {
-        XCTAssertNil(ClaudeSettingsInstaller.executablePath(inCommand: "[ -x '/a/UsageIslandPrototype' ] && exec '/b/UsageIslandPrototype' --claude-statusline || true"))
-        XCTAssertNil(ClaudeSettingsInstaller.executablePath(inCommand: "'/a/UsageIslandPrototype'; rm -rf x' --claude-statusline"))
-        XCTAssertFalse(ClaudeSettingsInstaller.isBridge(["command": "~/bin/my-status"]))
-        XCTAssertFalse(ClaudeSettingsInstaller.isBridge(["command": "'/usr/bin/other' --claude-statusline"]))
-    }
-
-    func testRepairMigratesTheOriginalFormatForThisApp() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("uip-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let installer = ClaudeSettingsInstaller(claudeDirectory: directory, executablePath: path, executableExists: { _ in true })
-        let original = #"{"model":"opus","statusLine":{"type":"command","command":"'\#(path)' --claude-statusline","padding":0}}"#
-        try Data(original.utf8).write(to: installer.settingsURL)
-
-        installer.repairIfNeeded()
-
-        let settings = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: installer.settingsURL)) as? [String: Any])
-        XCTAssertEqual((settings["statusLine"] as? [String: Any])?["command"] as? String, installer.command)
-        XCTAssertEqual(settings["model"] as? String, "opus")
-    }
-
+final class ClaudeQueryEnvironmentTests: XCTestCase {
     func testClaudeQueriesSkipUpdatesAndNonEssentialTraffic() {
         let environment = ClaudeUsageCommand.environment(from: ["PATH": "/usr/bin", "HOME": "/Users/example"])
         XCTAssertEqual(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
@@ -293,4 +262,58 @@ private struct FixedAlertClock: UsageClock {
     let value: Date
     init(_ value: Date) { self.value = value }
     func now() -> Date { value }
+}
+
+@MainActor
+final class ProviderVisibilityTests: XCTestCase {
+    func testOnlyInstalledProvidersGetCardsAndThePill() async throws {
+        let model = try AppModel(
+            providerAdapters: [FailingProvider(id: .codex, error: CodexUsageError.appServerFailure(.executableUnavailable)),
+                               WorkingProvider(id: .claude)],
+            clock: FixedAlertClock(start), initialSnapshots: []
+        )
+        XCTAssertEqual(model.visibleProviderIDs, [.codex, .claude], "before the first refresh nothing is hidden")
+
+        await model.refreshUsage()
+        XCTAssertEqual(model.issues[.codex], .notInstalled)
+        XCTAssertEqual(model.visibleProviderIDs, [.claude], "a Claude-only user sees only Claude")
+        XCTAssertEqual(model.pillProviderID, .claude)
+    }
+
+    func testSignedOutOrNoPlanProvidersStayVisibleWithTheirReason() async throws {
+        let model = try AppModel(
+            providerAdapters: [FailingProvider(id: .codex, error: CodexUsageError.notAuthenticated),
+                               FailingProvider(id: .claude, error: ClaudeUsageError.noPlanLimits)],
+            clock: FixedAlertClock(start), initialSnapshots: []
+        )
+        await model.refreshUsage()
+        XCTAssertEqual(model.visibleProviderIDs, [.codex, .claude])
+        XCTAssertNil(model.displayedProviderID)
+        XCTAssertEqual(model.pillProviderID, .codex, "the pill still names a provider")
+    }
+
+    func testNothingInstalledLeavesNoCards() async throws {
+        let model = try AppModel(
+            providerAdapters: [FailingProvider(id: .codex, error: CodexUsageError.appServerFailure(.executableUnavailable)),
+                               FailingProvider(id: .claude, error: ClaudeUsageError.cliNotFound)],
+            clock: FixedAlertClock(start), initialSnapshots: []
+        )
+        await model.refreshUsage()
+        XCTAssertEqual(model.visibleProviderIDs, [])
+        XCTAssertNil(model.pillProviderID)
+        XCTAssertEqual(CodexEdgeLayout.panelHeight(settings: false, model: model),
+                       CodexEdgeLayout.panelPadding * 2 + CodexEdgeLayout.headerHeight + 14
+                       + CodexEdgeLayout.welcomeCardHeight + CodexEdgeLayout.footerHeight)
+    }
+}
+
+private struct FailingProvider: UsageProvider {
+    let id: ProviderID
+    let error: any Error & Sendable
+    func fetchUsage() async throws -> UsageSnapshot { throw error }
+}
+
+private struct WorkingProvider: UsageProvider {
+    let id: ProviderID
+    func fetchUsage() async throws -> UsageSnapshot { try snapshot(id, used: 20) }
 }

@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 final class EdgePanelNavigation: ObservableObject {
     @Published var showsSettings = false
+    /// The one-time welcome page; it takes the settings page's height.
+    @Published var showsWelcome = false
     private var generation: UInt64 = 0
     private var presented = false
 
@@ -22,6 +24,7 @@ final class EdgePanelNavigation: ObservableObject {
     func finishClosing(_ token: UInt64) {
         guard canFinishClosing(token) else { return }
         showsSettings = false
+        showsWelcome = false
     }
 }
 

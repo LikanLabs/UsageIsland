@@ -1,3 +1,16 @@
+# Validation — 2026-10-01 (welcome, no-setup Claude, single provider)
+
+- Removed the empty placeholder Settings window by running on AppKit
+  directly; reopening the app now shows the usage panel (checked with a
+  packaged build: a reopen added the details panel, no other window).
+- Removed the optional Claude status line bridge. On launch the app deletes
+  the status line older versions added (both formats) and its record, never
+  a user's own status line or an unreadable settings file.
+- Providers whose CLI is not installed get no card; with none installed a
+  welcome card explains what to install.
+- One-time welcome page; new installs default to the available percentage.
+- `swift test`: 271 tests pass; resilience checks pass.
+
 # Validation — 2026-09-30 (alerts, login, update relaunch, battery)
 
 - `swift test`: 277 tests pass; the timing-sensitive suites (refresh power,

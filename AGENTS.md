@@ -81,9 +81,9 @@ responses, launch subprocesses, read credentials or calculate provider rules.
 ## Provider scope
 
 Usage Island supports Codex through `codex app-server` and Claude Code through
-its CLI's `get_usage` request, with an optional status line bridge for instant
-terminal updates. Other usage providers and synthetic demo providers are
-outside the product scope.
+its CLI's `get_usage` request. Both are detected automatically and need no
+setup; avoid adding per-provider connect steps. Other usage providers and
+synthetic demo providers are outside the product scope.
 
 ## Data rules
 
@@ -113,10 +113,10 @@ outside the product scope.
 ## Claude integration rules
 
 - Read plan limits only from Claude Code itself: the CLI's `get_usage` control
-  request (run isolated with `--restricted`, `--strict-mcp-config`,
+  request, run isolated with `--restricted`, `--strict-mcp-config`,
   `--tools ""` and `--no-session-persistence`, no prompt, at most every two
-  minutes), or the `rate_limits` field it passes to its status line command,
-  for which the app's own executable is the command (`--claude-statusline`).
+  minutes, with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `DISABLE_AUTOUPDATER=1`.
 - The `get_usage` shape is experimental; parse strictly and fall back to the
   last valid reading. Read limits from its ordered `limits` rows, classified
   only by `kind` (`session`, `weekly_all`, `weekly_scoped` with its scope
@@ -124,11 +124,17 @@ outside the product scope.
 - Store only the rate-limit percentages, reset times and capture time.
 - Never read Claude credentials, the Keychain, OAuth tokens or private
   endpoints such as `api/oauth/usage`.
-- Change only the `statusLine` key of `~/.claude/settings.json`, only on the
-  user's request, and never replace a status line the user already has.
+- Do not write to `~/.claude/settings.json`. The only exception is removing
+  the status line that versions 0.1.3–0.1.7 added (`--claude-statusline`),
+  never a status line the user wrote. The executable must keep exiting
+  quietly when called with `--claude-statusline`.
 
 ## System integration rules
 
+- The first launch opens the panel once on the welcome page; people upgrading
+  from a version without it never see it. macOS is asked for notification
+  permission only when the user finishes it, or turns alerts on later.
+- New installs show the available percentage by default.
 - Notifications are local only (`UNUserNotificationCenter`), alert only on a
   change observed from fresh official readings (never on the first reading
   or stale data), and respect the "Alert when running low" preference.

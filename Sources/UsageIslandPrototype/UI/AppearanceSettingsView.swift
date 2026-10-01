@@ -4,7 +4,6 @@ import SwiftUI
 /// controls, which adopt Liquid Glass on macOS 26 and later.
 struct AppearanceSettingsView: View {
     @ObservedObject var preferences: AppPreferences = .shared
-    @ObservedObject var claude: ClaudeConnection
     @ObservedObject var system: SystemIntegration
 
     var body: some View {
@@ -75,7 +74,6 @@ struct AppearanceSettingsView: View {
                     }
                 }
             }
-            group { claudeRow }
         }
         .onAppear { system.refresh() }
     }
@@ -86,39 +84,6 @@ struct AppearanceSettingsView: View {
                 .font(.system(size: 11)).foregroundStyle(.orange)
         }
         .buttonStyle(.plain)
-    }
-
-    /// Optional: the status line bridge updates Claude instantly after each
-    /// terminal reply. Claude usage works without it.
-    private var claudeRow: some View {
-        HStack(spacing: 7) {
-            ProviderMark(provider: .claude, color: IslandPalette.claude).frame(width: 13, height: 13)
-            VStack(alignment: .leading, spacing: 1) {
-                label(preferences.text("Claude in terminal", "Claude en terminal"))
-                Text(preferences.text("Instant updates", "Actualización instantánea"))
-                    .font(.system(size: 10)).foregroundStyle(.tertiary)
-            }
-            .help(preferences.text("Optional. Updates Claude usage right after each reply in Claude Code in the terminal.",
-                                   "Opcional. Actualiza el consumo de Claude justo después de cada respuesta en Claude Code en la terminal."))
-            Spacer()
-            switch claude.status {
-            case .notInstalled:
-                Button(preferences.text("Connect", "Conectar")) { claude.connect() }
-                    .islandTextButtonStyle().controlSize(.small)
-            case .installed:
-                Button(preferences.text("Disconnect", "Desconectar")) { claude.disconnect() }
-                    .islandTextButtonStyle().controlSize(.small)
-            case .otherStatusLine:
-                note(preferences.text("Own status line", "Barra propia"))
-                    .help(preferences.text("Usage Island never replaces your own Claude Code status line.",
-                                           "Usage Island nunca reemplaza tu propia barra de estado de Claude Code."))
-            case .claudeNotFound:
-                note(preferences.text("Not installed", "No instalado"))
-            case .unreadableSettings:
-                note(preferences.text("Settings unreadable", "Ajustes ilegibles"))
-            }
-        }
-        .onAppear { claude.reloadStatus() }
     }
 
     private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -136,10 +101,6 @@ struct AppearanceSettingsView: View {
 
     private var divider: some View {
         Rectangle().fill(IslandPalette.cardEdge).frame(height: 0.5)
-    }
-
-    private func note(_ text: String) -> some View {
-        Text(text).font(.system(size: 11)).foregroundStyle(.tertiary)
     }
 
     private func label(_ text: String) -> some View {

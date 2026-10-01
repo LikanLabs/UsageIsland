@@ -1,28 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// Claude Code runs this executable as its status line command. That mode
-/// records the plan limits and exits without starting the app.
+/// Versions 0.1.3–0.1.7 could register this executable as Claude Code's
+/// status line (`--claude-statusline`). Until that entry is cleaned up, such
+/// a call must print nothing and exit instead of starting a second app.
+///
+/// The app itself runs on AppKit directly: all of its UI lives in the pill
+/// and panel windows. (A SwiftUI `App` needs at least one scene, and its
+/// placeholder Settings window could be opened empty by the system.)
 @main
 enum UsageIslandMain {
     static func main() {
-        if CommandLine.arguments.dropFirst().first == ClaudeStatuslineBridge.argument {
-            let input = FileHandle.standardInput.readDataToEndOfFile()
-            print(ClaudeStatuslineBridge.run(input: input))
+        if CommandLine.arguments.dropFirst().first == ClaudeLegacyBridge.argument {
             return
         }
-        UsageIslandPrototypeApp.main()
-    }
-}
-
-struct UsageIslandPrototypeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
-    var body: some Scene {
-        Settings {
-            EmptyView()
+        MainActor.assumeIsolated {
+            let application = NSApplication.shared
+            let delegate = AppDelegate()
+            application.delegate = delegate
+            withExtendedLifetime(delegate) { application.run() }
         }
-        .commands { CommandGroup(replacing: .appSettings) {} }
     }
 }
 
@@ -33,12 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let terminationReply: (Bool) -> Void
     private var refreshController: UsageRefreshController?
     private var islandController: CodexEdgeWindowController?
-    private var claudeConnection: ClaudeConnection?
     private var alertMonitor: UsageAlertMonitor?
     private var updateCheck: Timer?
     private var relaunchPending = false
     private let runningVersion = BundleVersion.onDisk(at: Bundle.main.bundleURL)
-    private let claudeRecordURL: URL
     private var initialRefreshTask: Task<Void, Never>?
     private var terminationTask: Task<Void, Never>?
     private var didBeginTermination = false
@@ -51,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         model = composition.model
         codexUsageProvider = composition.codexUsageProvider
-        claudeRecordURL = composition.claudeRecordURL
         terminationReply = { shouldTerminate in
             NSApp.reply(toApplicationShouldTerminate: shouldTerminate)
         }
@@ -64,7 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) {
         model = composition.model
         codexUsageProvider = composition.codexUsageProvider
-        claudeRecordURL = composition.claudeRecordURL
         self.terminationReply = terminationReply
         super.init()
     }
@@ -93,7 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static func makeLiveComposition(
         clock: any UsageClock,
         locator: ExecutableLocator,
-        claudeRecordURL: URL = ClaudeStatuslineBridge.defaultRecordURL,
         makeCodexProvider: @escaping @Sendable (
             CodexAppServerConfiguration,
             any UsageClock
@@ -108,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             makeCodexProvider: makeCodexProvider
         )
         let claude = ClaudeUsageProvider(
-            recordURL: claudeRecordURL,
             clock: clock,
             makeQuery: makeClaudeQuery ?? ClaudeUsageProvider.cliQuery(locator: locator)
         )
@@ -121,23 +112,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         return LiveComposition(
             model: model,
-            codexUsageProvider: provider,
-            claudeRecordURL: claudeRecordURL
+            codexUsageProvider: provider
         )
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let claude = ClaudeConnection(installer: ClaudeSettingsInstaller(), model: model, recordURL: claudeRecordURL)
-        claudeConnection = claude
-        claude.start()
+        // Undo the Claude Code status line older versions could add.
+        ClaudeLegacyBridge.removeIfInstalled()
         let notifier = SystemUsageNotifier()
+        // Clicking an alert opens the usage panel.
+        notifier.onOpen = { [weak self] in self?.showUsagePanel() }
         let system = SystemIntegration(login: SystemLoginItem(), notifier: notifier)
         let alerts = UsageAlertMonitor(model: model, preferences: .shared, notifier: notifier, clock: SystemUsageClock())
         alertMonitor = alerts
         alerts.start()
-        let island = CodexEdgeWindowController(model: model, claude: claude, system: system)
+        let island = CodexEdgeWindowController(model: model, system: system)
         islandController = island
         island.show()
         startInitialRefresh()
@@ -178,7 +169,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateCheck?.invalidate()
         updateCheck = nil
         alertMonitor?.stop()
-        claudeConnection?.stop()
         refreshController?.stop()
         refreshController = nil
         initialRefreshTask?.cancel()
@@ -186,6 +176,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.stop()
         islandController?.shutdown()
         islandController = nil
+    }
+
+    /// Opening the app again (its icon in Finder, Launchpad or Spotlight)
+    /// shows the usage panel instead of asking for a window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showUsagePanel()
+        return false
+    }
+
+    private func showUsagePanel() {
+        guard !didBeginTermination, !model.isPulseOpen else { return }
+        islandController?.togglePulse()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -251,5 +253,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct LiveComposition {
     let model: AppModel
     let codexUsageProvider: LocatingCodexUsageProvider
-    let claudeRecordURL: URL
 }

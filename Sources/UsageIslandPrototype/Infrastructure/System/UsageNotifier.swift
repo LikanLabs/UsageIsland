@@ -14,6 +14,9 @@ protocol UsageNotifying: Sendable {
 /// example `swift run`) every call is a no-op.
 final class SystemUsageNotifier: NSObject, UsageNotifying, UNUserNotificationCenterDelegate, @unchecked Sendable {
     private let center: UNUserNotificationCenter?
+    /// Called on the main actor when the user clicks one of our alerts. Set
+    /// once at launch, before any alert can be posted.
+    @MainActor var onOpen: (@MainActor () -> Void)?
 
     override init() {
         center = Bundle.main.bundleURL.pathExtension == "app" ? .current() : nil
@@ -39,6 +42,13 @@ final class SystemUsageNotifier: NSObject, UsageNotifying, UNUserNotificationCen
         content.sound = .default
         // One identifier per window: a newer alert replaces the older one.
         try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        await MainActor.run { onOpen?() }
     }
 
     /// Show banners even while the usage panel has focus.

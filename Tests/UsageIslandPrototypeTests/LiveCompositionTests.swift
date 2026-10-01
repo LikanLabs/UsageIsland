@@ -6,8 +6,6 @@ import XCTest
 
 @MainActor
 final class LiveCompositionTests: XCTestCase {
-    private static let missingClaudeRecord = FileManager.default.temporaryDirectory
-        .appendingPathComponent("usage-island-tests-\(UUID())/claude-rate-limits.json")
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
     func testLiveCompositionStartsWithoutInventedUsage() {
@@ -137,8 +135,7 @@ final class LiveCompositionTests: XCTestCase {
         let client = LiveFakeCodexClient()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator,
-            claudeRecordURL: Self.missingClaudeRecord
+            locator: locator
         ) { _, clock in
             probe.make(client: client, clock: clock)
         }
@@ -292,8 +289,7 @@ final class LiveCompositionTests: XCTestCase {
         )
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator,
-            claudeRecordURL: Self.missingClaudeRecord
+            locator: locator
         )
         let replies = TerminationReplyRecorder()
         let delegate = AppDelegate(
@@ -321,8 +317,7 @@ final class LiveCompositionTests: XCTestCase {
         let client = LiveFakeCodexClient()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator,
-            claudeRecordURL: Self.missingClaudeRecord
+            locator: locator
         ) { _, clock in
             probe.make(client: client, clock: clock)
         }
@@ -361,8 +356,7 @@ final class LiveCompositionTests: XCTestCase {
         let recorder = LocatedExecutableRecorder()
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator,
-            claudeRecordURL: Self.missingClaudeRecord
+            locator: locator
         ) { configuration, clock in
             recorder.record(configuration.executableURL)
             return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
@@ -391,8 +385,7 @@ final class LiveCompositionTests: XCTestCase {
                 ],
                 commonSearchPaths: [],
                 isExecutable: { $0.lastPathComponent == "codex" }
-            ),
-            claudeRecordURL: Self.missingClaudeRecord
+            )
         ) { configuration, clock in
             recorder.record(configuration.executableURL)
             return CodexUsageProvider(client: LiveFakeCodexClient(), clock: clock)
@@ -433,8 +426,7 @@ final class LiveCompositionTests: XCTestCase {
         )
         let composition = AppDelegate.makeLiveComposition(
             clock: FixedLiveClock(now),
-            locator: locator,
-            claudeRecordURL: Self.missingClaudeRecord
+            locator: locator
         ) { _, clock in
             providerFactory?(client, clock)
                 ?? CodexUsageProvider(client: client, clock: clock)

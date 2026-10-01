@@ -30,6 +30,20 @@ extension View {
             .overlay(shape.stroke(.white.opacity(0.16), lineWidth: 0.5))
     }
 
+    /// The one emphasized button of a page.
+    @ViewBuilder
+    func islandProminentButtonStyle() -> some View {
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *), !IslandPalette.rendersFlatSurfaces {
+            buttonStyle(.glassProminent).buttonBorderShape(.capsule)
+        } else {
+            buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+        }
+        #else
+        buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+        #endif
+    }
+
     /// Circular icon button that sits on a glass surface.
     @ViewBuilder
     func islandIconButtonStyle() -> some View {
@@ -41,20 +55,6 @@ extension View {
         }
         #else
         buttonStyle(IslandFallbackIconButtonStyle())
-        #endif
-    }
-
-    /// Small text button that sits on a glass surface.
-    @ViewBuilder
-    func islandTextButtonStyle() -> some View {
-        #if compiler(>=6.2)
-        if #available(macOS 26.0, *), !IslandPalette.rendersFlatSurfaces {
-            buttonStyle(.glass).buttonBorderShape(.capsule)
-        } else {
-            buttonStyle(.bordered).buttonBorderShape(.capsule)
-        }
-        #else
-        buttonStyle(.bordered).buttonBorderShape(.capsule)
         #endif
     }
 }

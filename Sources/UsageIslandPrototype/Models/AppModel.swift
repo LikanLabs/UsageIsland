@@ -110,6 +110,20 @@ public final class AppModel: ObservableObject {
         ProviderID.allCases.filter { id in providerAdapters.contains { $0.id == id } }
     }
 
+    /// Providers worth a card: every configured one except those whose CLI
+    /// is not installed, so someone who only uses Codex (or only Claude) sees
+    /// just that. Empty when none is installed.
+    public var visibleProviderIDs: [ProviderID] {
+        configuredProviderIDs.filter { id in
+            snapshot(for: id) != nil || issues[id] != .notInstalled
+        }
+    }
+
+    /// The provider the pill represents, even before any reading exists.
+    public var pillProviderID: ProviderID? {
+        displayedProviderID ?? visibleProviderIDs.first
+    }
+
     public func snapshot(for provider: ProviderID) -> UsageSnapshot? {
         providers.first { $0.id == provider }
     }

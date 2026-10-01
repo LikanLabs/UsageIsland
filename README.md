@@ -48,7 +48,9 @@ open -a "Usage Island"
 ```
 
 The app runs in the background; you can close Terminal. You can also open it
-from **Applications** in Finder.
+from **Applications** in Finder. The first time, the panel opens on a short
+welcome page that shows which tools it found and lets you pick the position,
+open at login and alerts.
 
 ### First launch
 
@@ -81,7 +83,7 @@ itself (it waits if the panel is open).
 | --- | --- |
 | Click the pill | Opens the panel with every tool's usage and refreshes it |
 | Refresh button | Updates now |
-| Gear | Settings: position, auto-hide, available or used %, language, size, open at login, alerts, Claude in terminal |
+| Gear | Settings: position, auto-hide, available or used %, language, size, open at login, alerts |
 | Right-click the pill | Refresh or quit |
 | Escape or click outside | Closes the panel |
 
@@ -123,15 +125,8 @@ isolated (`--restricted`, no MCP servers, no tools, no saved session), sends
 no prompt and uses no tokens. The numbers come from your account, so they
 include the terminal, the Claude desktop app and claude.ai.
 
-**Optional: instant updates in the terminal.** Under **Settings → Claude in
-terminal**, click **Connect**. This adds a status line to
-`~/.claude/settings.json` that shows `5h 32% · 7d 58%` in Claude Code and
-passes those numbers to Usage Island after each reply. It saves only the
-percentages and reset times, to
-`~/Library/Application Support/Usage Island/claude-rate-limits.json`. If you
-already have your own status line, it is left untouched. **Disconnect**
-removes it. (The Claude desktop app does not run status lines, which is why
-the CLI query above exists.)
+There is nothing to connect: if `codex` or `claude` is installed and signed
+in, Usage Island finds it. If you only use one of them, you only see that one.
 
 ## Uninstall
 
@@ -139,9 +134,7 @@ the CLI query above exists.)
 brew uninstall --zap --cask usage-island
 ```
 
-`--zap` also removes the app's preferences. If you connected Claude in the
-terminal, click **Disconnect** first, or remove the `statusLine` entry from
-`~/.claude/settings.json`.
+`--zap` also removes the app's preferences.
 
 ## Troubleshooting
 

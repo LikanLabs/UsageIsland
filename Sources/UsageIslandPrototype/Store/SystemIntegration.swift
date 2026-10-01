@@ -30,6 +30,15 @@ final class SystemIntegration: ObservableObject {
         login.openSystemSettings()
     }
 
+    /// Asks macOS for permission to post alerts, then re-reads the result.
+    func requestNotificationPermission() {
+        let notifier = notifier
+        Task { [weak self] in
+            _ = await notifier.requestAuthorization()
+            self?.refresh()
+        }
+    }
+
     func openNotificationSettings() {
         SystemUsageNotifier.openSystemSettings()
     }

@@ -26,8 +26,9 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 - Swift 6, macOS 14+, SwiftUI/AppKit, sin dependencias externas.
 - Claude: cada 2 minutos la app consulta a la CLI instalada `get_usage`
   (aislada, sin prompt ni tokens); cubre terminal, app de escritorio y claude.ai.
-  Opcional: puente `--claude-statusline` para actualizar al instante en la
-  terminal (la app de escritorio no ejecuta barras de estado).
+  El 1 de octubre se quitó el puente opcional de barra de estado: Codex y
+  Claude se detectan solos y no hay nada que conectar. Al arrancar, la app
+  borra la barra que agregaban las versiones 0.1.3–0.1.7.
 - Codex real mediante `codex app-server` (JSON-RPC por stdio), reutilizando la
   autenticación de la CLI sin leer credenciales. Sin datos demo en producción.
 - Uso de sesión y semanal con fechas de reinicio absolutas; español, inglés o
@@ -50,8 +51,9 @@ Rutas relativas a `Sources/UsageIslandPrototype/`:
 
 - `UI/CodexEdgeView.swift`, `UI/AppearanceSettingsView.swift`, `UI/CodexMark.swift`,
   `UI/ClaudeMark.swift`: interfaz.
-- `Infrastructure/Claude/`, `Providers/Claude/`, `Store/ClaudeConnection.swift`: puente,
-  instalador del `statusLine` y proveedor de Claude.
+- `Infrastructure/Claude/`, `Providers/Claude/`: consulta a la CLI, limpieza
+  de la barra antigua y proveedor de Claude.
+- `UI/WelcomeView.swift`: bienvenida de la primera vez.
 - `Window/CodexEdgeWindowController.swift`, `EdgeWindowGeometry.swift`,
   `DockVisibilityState.swift`, `EdgePanelNavigation.swift`, `ScreenNotchGeometry.swift`:
   ventanas, geometría y auto-hide.

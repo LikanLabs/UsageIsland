@@ -12,4 +12,12 @@ cask "usage-island" do
   app "Usage Island.app"
 
   zap trash: "~/Library/Preferences/com.likanlabs.usageisland.plist"
+
+  caveats <<~EOS
+    Usage Island is not notarized by Apple yet. If macOS blocks the first launch,
+    click Done (not Move to Trash), then open
+      System Settings > Privacy & Security
+    and click "Open Anyway" next to Usage Island. This is needed only once.
+    Start it with: open -a "Usage Island"
+  EOS
 end
