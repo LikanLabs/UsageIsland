@@ -99,8 +99,14 @@ final class CodexEdgeWindowController {
                 .sink { [weak self] _ in
                     self?.screensAsleep = asleep
                     self?.updateVisibilityTimer()
+                    // Nobody sees an open panel while the displays sleep.
+                    if asleep { self?.model.closePulse() }
                 }.store(in: &subscriptions)
         }
+        DistributedNotificationCenter.default().publisher(for: UsageRefreshController.screenLocked)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.model.closePulse() }
+            .store(in: &subscriptions)
         for event in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
             NSWorkspace.shared.notificationCenter.publisher(for: event)
                 .receive(on: RunLoop.main)
@@ -123,6 +129,8 @@ final class CodexEdgeWindowController {
             return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0
         } ?? NSScreen.screens.first
         guard let screen else {
+            // Close through the model so its state matches what is shown.
+            model.closePulse()
             tab?.orderOut(nil)
             detail?.orderOut(nil)
             model.islandIsVisible = false
@@ -155,7 +163,20 @@ final class CodexEdgeWindowController {
     }
 
     func togglePulse() {
-        if model.isPulseOpen { model.closePulse() } else { pinDetails() }
+        if isDetailShowing { model.closePulse() } else { showDetails() }
+    }
+
+    /// Opens the panel, also when the model still says "open" for a panel
+    /// that is no longer on screen (the system can remove it while the
+    /// displays sleep), so a tap never does nothing.
+    func showDetails() {
+        if model.isPulseOpen, !isDetailShowing { model.closePulse() }
+        guard !model.isPulseOpen else { return }
+        pinDetails()
+    }
+
+    private var isDetailShowing: Bool {
+        model.isPulseOpen && detail?.isVisible == true && (detail?.alphaValue ?? 0) > 0.01
     }
 
     private func pinDetails() {

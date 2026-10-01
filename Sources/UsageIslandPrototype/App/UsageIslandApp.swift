@@ -186,8 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showUsagePanel() {
-        guard !didBeginTermination, !model.isPulseOpen else { return }
-        islandController?.togglePulse()
+        guard !didBeginTermination else { return }
+        islandController?.showDetails()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

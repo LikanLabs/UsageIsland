@@ -453,7 +453,13 @@ struct CodexUsageDetailView: View {
                 if let forecast = model.forecast(for: provider) {
                     forecastLine(forecast)
                 }
-                if snapshot.freshness == .stale {
+                if snapshot.freshness == .stale, model.issues[provider] == .notSignedIn {
+                    // An expired sign-in explains why the reading stopped.
+                    Label(Self.signInHint(provider, preferences: preferences), systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .frame(height: CodexEdgeLayout.staleNoteHeight - 10)
+                } else if snapshot.freshness == .stale {
                     Label(preferences.text("Last known usage · update pending", "Último consumo conocido · pendiente de actualizar"),
                           systemImage: "clock.arrow.circlepath")
                         .font(.system(size: 11)).foregroundStyle(.orange)
@@ -523,6 +529,17 @@ struct CodexUsageDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
     }
 
+    static func signInHint(_ provider: ProviderID, preferences: AppPreferences) -> String {
+        switch provider {
+        case .codex:
+            preferences.text("Codex sign-in expired: run codex login in Terminal",
+                             "Sesión de Codex expirada: ejecuta codex login en la Terminal")
+        case .claude:
+            preferences.text("Claude sign-in needed: run claude, then /login",
+                             "Falta iniciar sesión en Claude: ejecuta claude y luego /login")
+        }
+    }
+
     private func unavailableText(_ provider: ProviderID) -> String {
         let cli = provider == .codex ? "Codex CLI" : "Claude Code"
         if model.connectionStates[provider] == .connecting, model.issues[provider] == nil {
@@ -532,8 +549,7 @@ struct CodexUsageDetailView: View {
         case .notInstalled:
             return preferences.text("\(cli) is not installed.", "\(cli) no está instalado.")
         case .notSignedIn:
-            return preferences.text("Sign in to \(cli) in Terminal with your subscription.",
-                                    "Inicia sesión en \(cli) desde la Terminal con tu suscripción.")
+            return Self.signInHint(provider, preferences: preferences)
         case .noPlanLimits:
             return preferences.text("This account has no plan limits (API key or pay-as-you-go).",
                                     "Esta cuenta no tiene límites de plan (clave de API o pago por uso).")

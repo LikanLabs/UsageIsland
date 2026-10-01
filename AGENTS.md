@@ -117,11 +117,13 @@ synthetic demo providers are outside the product scope.
 
 - Read plan limits only from Claude Code itself: the CLI's `get_usage` control
   request, run isolated with `--restricted`, `--strict-mcp-config`,
-  `--tools ""` and `--no-session-persistence`, no prompt, at most every two
-  minutes, with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
+  `--tools ""` and `--no-session-persistence`, no prompt, at most every five
+  minutes (doubling after each failed answer, up to an hour, because Claude's
+  usage service throttles frequent reads), with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
   `DISABLE_AUTOUPDATER=1`.
 - The `get_usage` shape is experimental; parse strictly and fall back to the
-  last valid reading. Read limits from its ordered `limits` rows, classified
+  last valid reading. `rate_limits_available: false` means no plan limits;
+  `rate_limits: null` with plan limits available is a temporary failure. Read limits from its ordered `limits` rows, classified
   only by `kind` (`session`, `weekly_all`, `weekly_scoped` with its scope
   name); skip unknown kinds instead of guessing.
 - Store only the rate-limit percentages, reset times and capture time.

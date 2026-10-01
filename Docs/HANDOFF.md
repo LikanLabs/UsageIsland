@@ -24,7 +24,8 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 ## Estado implementado
 
 - Swift 6, macOS 14+, SwiftUI/AppKit, sin dependencias externas.
-- Claude: cada 2 minutos la app consulta a la CLI instalada `get_usage`
+- Claude: cada 5 minutos (con espera creciente si falla, hasta 1 hora) la app
+  consulta a la CLI instalada `get_usage`
   (aislada, sin prompt ni tokens); cubre terminal, app de escritorio y claude.ai.
   El 1 de octubre se quitó el puente opcional de barra de estado: Codex y
   Claude se detectan solos y no hay nada que conectar. Al arrancar, la app

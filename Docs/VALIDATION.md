@@ -1,3 +1,20 @@
+# Validation — 2026-10-01 (stuck panel, Claude throttling, expired Codex sign-in)
+
+- Found in real use after 12 hours: the panel stayed "open" in the model
+  after the system removed it during display sleep, so taps did nothing;
+  Claude's usage service returned `rate_limits: null` (shown as "no plan
+  limits"); Codex's backend rejected an invalidated sign-in (shown as
+  "couldn't read usage").
+- Fixes: open/close checks the panel is really on screen and the panel closes
+  on screen lock and display sleep; Claude polls every 5 minutes with
+  doubling backoff and reports empty answers as temporary; polling checks
+  the real lock and display state each cycle; rejected sign-ins map to
+  "sign in again" with the exact command.
+- Verified with a packaged build: reopen opens the panel, a second reopen
+  keeps it open, activating another app closes it, reopen opens it again;
+  the Codex card reads "Codex sign-in expired: run codex login".
+- `swift test`: 285 tests pass; timing-sensitive suites passed five runs.
+
 # Validation — 2026-10-01 (welcome, no-setup Claude, single provider)
 
 - Removed the empty placeholder Settings window by running on AppKit

@@ -138,7 +138,7 @@ struct JSONRPCErrorResponseMessage: Encodable {
 
 enum JSONRPCIncomingMessage: Sendable {
     case success(id: JSONRPCRequestID, result: JSONValue)
-    case failure(id: JSONRPCRequestID, code: Int)
+    case failure(id: JSONRPCRequestID, code: Int, authenticationRejected: Bool)
     case notification(JSONRPCNotification)
     case request(id: JSONRPCRequestID)
 }
@@ -201,6 +201,10 @@ private struct IncomingEnvelope: Decodable {
 
     private struct RemoteError: Decodable {
         let code: Int
+        /// The server said the caller's sign-in was rejected (HTTP 401, an
+        /// invalidated or expired token). Only this flag is kept; the
+        /// message itself is discarded because it may carry account detail.
+        let authenticationRejected: Bool
 
         private enum CodingKeys: String, CodingKey {
             case code
@@ -210,7 +214,9 @@ private struct IncomingEnvelope: Decodable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             code = try container.decode(Int.self, forKey: .code)
-            _ = try container.decode(String.self, forKey: .message)
+            let message = try container.decode(String.self, forKey: .message)
+            authenticationRejected = ["401 Unauthorized", "token_invalidated", "token_expired"]
+                .contains { message.localizedCaseInsensitiveContains($0) }
         }
     }
 
@@ -247,7 +253,7 @@ private struct IncomingEnvelope: Decodable {
         }
         if hasError {
             let error = try container.decode(RemoteError.self, forKey: .error)
-            message = .failure(id: id, code: error.code)
+            message = .failure(id: id, code: error.code, authenticationRejected: error.authenticationRejected)
             return
         }
 

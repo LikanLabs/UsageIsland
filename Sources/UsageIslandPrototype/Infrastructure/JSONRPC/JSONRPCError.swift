@@ -26,6 +26,8 @@ public enum JSONRPCError: Error, Equatable, Sendable {
     case notificationBufferOverflow(limit: Int)
     case unknownResponseID(JSONRPCRequestID)
     case remoteError(code: Int)
+    /// The remote side rejected the caller's sign-in (expired or invalid).
+    case remoteAuthenticationRejected
     case transportClosed
 }
 
@@ -82,6 +84,8 @@ extension JSONRPCError: LocalizedError {
             "The transport received an unknown response ID \(id.diagnosticDescription)."
         case .remoteError(let code):
             "The remote endpoint returned JSON-RPC error code \(code)."
+        case .remoteAuthenticationRejected:
+            "The remote endpoint rejected the sign-in."
         case .transportClosed:
             "The JSON-RPC transport is closed."
         }

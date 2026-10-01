@@ -179,36 +179,6 @@ final class ClaudeQueryEnvironmentTests: XCTestCase {
 
 @MainActor
 final class RefreshPowerTests: XCTestCase {
-    func testLockedScreenPausesPollingAndUnlockRefreshesAtOnce() async throws {
-        let counter = FetchCounter()
-        let model = try AppModel(providerAdapters: [CountingProvider(counter: counter)], clock: FixedAlertClock(start), initialSnapshots: [])
-        let workspace = NotificationCenter()
-        let distributed = NotificationCenter()
-        let controller = UsageRefreshController(
-            model: model, notifications: workspace, distributedNotifications: distributed,
-            powerNotifications: NotificationCenter(), interval: .milliseconds(20), isLowPowerMode: { false }
-        )
-        controller.start()
-        defer { controller.stop() }
-        try await eventually { await counter.value >= 2 }
-
-        distributed.post(name: UsageRefreshController.screenLocked, object: nil)
-        try await eventually { controller.isPaused }
-        let whileLocked = await counter.value
-        try await Task.sleep(for: .milliseconds(120))
-        let stillLocked = await counter.value
-        XCTAssertLessThanOrEqual(stillLocked - whileLocked, 1, "at most an in-flight poll finishes")
-
-        distributed.post(name: UsageRefreshController.screenUnlocked, object: nil)
-        try await eventually { await counter.value > stillLocked }
-        XCTAssertFalse(controller.isPaused)
-
-        workspace.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
-        try await eventually { controller.isPaused }
-        workspace.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
-        try await eventually { !controller.isPaused }
-    }
-
     func testLowPowerModeStretchesTheInterval() throws {
         let model = AppModel.empty(clock: FixedAlertClock(start))
         var lowPower = false

@@ -1,19 +1,16 @@
 import AppKit
+import CoreGraphics
 import Combine
 
 /// Owns polling and power lifecycle independently of the UI's visibility.
 ///
 /// - System sleep suspends polling and marks readings stale; wake refreshes.
-/// - A locked screen or sleeping displays only pause polling (nobody can see
-///   the pill); unlocking or waking the displays refreshes right away.
+/// - A locked screen or sleeping displays skip polls (nobody can see the
+///   pill). Each poll checks the real state, so a missed notification can
+///   never leave polling paused; unlocking or waking refreshes right away.
 /// - Low Power Mode stretches the interval.
 @MainActor
 final class UsageRefreshController {
-    private enum Pause: Hashable {
-        case locked
-        case displaysAsleep
-    }
-
     static let lowPowerMultiplier = 3
 
     private let model: AppModel
@@ -22,24 +19,35 @@ final class UsageRefreshController {
     private let powerNotifications: NotificationCenter
     private let interval: Duration
     private let isLowPowerMode: @MainActor () -> Bool
+    private let isScreenLocked: @MainActor () -> Bool
+    private let areDisplaysAsleep: @MainActor () -> Bool
     private var task: Task<Void, Never>?
     private var subscriptions: Set<AnyCancellable> = []
     private var running = false
     private var sleeping = false
-    private var pauses: Set<Pause> = []
 
     init(model: AppModel,
          notifications: NotificationCenter = NSWorkspace.shared.notificationCenter,
          distributedNotifications: NotificationCenter = DistributedNotificationCenter.default(),
          powerNotifications: NotificationCenter = .default,
          interval: Duration = .seconds(60),
-         isLowPowerMode: @escaping @MainActor () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }) {
+         isLowPowerMode: @escaping @MainActor () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled },
+         isScreenLocked: @escaping @MainActor () -> Bool = UsageRefreshController.systemScreenIsLocked,
+         areDisplaysAsleep: @escaping @MainActor () -> Bool = { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }) {
         self.model = model
         self.notifications = notifications
         self.distributedNotifications = distributedNotifications
         self.powerNotifications = powerNotifications
         self.interval = interval
         self.isLowPowerMode = isLowPowerMode
+        self.isScreenLocked = isScreenLocked
+        self.areDisplaysAsleep = areDisplaysAsleep
+    }
+
+    /// The login session's own lock flag, read fresh on every check.
+    static func systemScreenIsLocked() -> Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        return (session["CGSSessionScreenIsLocked"] as? Bool) ?? false
     }
 
     static let screenLocked = Notification.Name("com.apple.screenIsLocked")
@@ -50,17 +58,17 @@ final class UsageRefreshController {
         isLowPowerMode() ? interval * Self.lowPowerMultiplier : interval
     }
 
-    var isPaused: Bool { sleeping || !pauses.isEmpty }
+    var isPaused: Bool { sleeping || isScreenLocked() || areDisplaysAsleep() }
 
     func start() {
         guard !running else { return }
         running = true
         observe(notifications, NSWorkspace.willSleepNotification) { $0.suspend() }
         observe(notifications, NSWorkspace.didWakeNotification) { $0.resume() }
-        observe(notifications, NSWorkspace.screensDidSleepNotification) { $0.pause(.displaysAsleep) }
-        observe(notifications, NSWorkspace.screensDidWakeNotification) { $0.unpause(.displaysAsleep) }
-        observe(distributedNotifications, Self.screenLocked) { $0.pause(.locked) }
-        observe(distributedNotifications, Self.screenUnlocked) { $0.unpause(.locked) }
+        // Locking or display sleep needs no handling: polls check the real
+        // state. Coming back refreshes at once.
+        observe(notifications, NSWorkspace.screensDidWakeNotification) { $0.refreshSoon() }
+        observe(distributedNotifications, Self.screenUnlocked) { $0.refreshSoon() }
         // A new power state takes effect from the next wait.
         observe(powerNotifications, Notification.Name.NSProcessInfoPowerStateDidChange) { $0.reschedule() }
         schedule(refreshImmediately: false)
@@ -77,29 +85,19 @@ final class UsageRefreshController {
     func resume() {
         guard running, sleeping else { return }
         sleeping = false
-        // Displays are awake after a system wake even if their own wake
-        // notification was missed; a still-locked screen stays paused.
-        pauses.remove(.displaysAsleep)
-        if pauses.isEmpty { schedule(refreshImmediately: true) }
+        schedule(refreshImmediately: true)
     }
 
     func stop() {
         running = false
         sleeping = false
-        pauses.removeAll()
         task?.cancel()
         task = nil
         subscriptions.removeAll()
     }
 
-    private func pause(_ reason: Pause) {
-        guard running, pauses.insert(reason).inserted else { return }
-        task?.cancel()
-        task = nil
-    }
-
-    private func unpause(_ reason: Pause) {
-        guard running, pauses.remove(reason) != nil, !isPaused else { return }
+    private func refreshSoon() {
+        guard running, !sleeping else { return }
         schedule(refreshImmediately: true)
     }
 

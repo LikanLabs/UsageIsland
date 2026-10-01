@@ -124,7 +124,7 @@ number. Once a window's reset time has passed, the old value is shown as "—".
 asks it for the rate limits over JSON-RPC, once a minute and whenever you open
 the panel. The CLI uses its own sign-in.
 
-**Claude Code.** Every two minutes, and when you open the panel, the app asks
+**Claude Code.** Every five minutes, and when you open the panel, the app asks
 the installed `claude` CLI for its structured `/usage` data. The query runs
 isolated (`--restricted`, no MCP servers, no tools, no saved session), sends
 no prompt and uses no tokens. The numbers come from your account, so they

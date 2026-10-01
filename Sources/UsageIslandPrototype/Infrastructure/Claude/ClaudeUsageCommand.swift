@@ -126,6 +126,9 @@ enum ClaudeUsageResponseParser {
         case requestFailed
         /// API key or third-party provider sessions have no plan limits.
         case limitsUnavailable
+        /// Plan limits apply, but Claude Code had none to report this time
+        /// (for example while its usage service is throttling requests).
+        case temporarilyUnavailable
     }
 
     static func limits(from output: Data) throws(Failure) -> Limits {
@@ -136,9 +139,10 @@ enum ClaudeUsageResponseParser {
             guard message.response?.subtype == "success", let body = message.response?.response else {
                 throw .requestFailed
             }
-            guard body.rateLimitsAvailable, let limits = body.rateLimits else { throw .limitsUnavailable }
+            guard body.rateLimitsAvailable else { throw .limitsUnavailable }
+            guard let limits = body.rateLimits else { throw .temporarilyUnavailable }
             let windows = rows(limits.limits) ?? legacyWindows(limits)
-            guard !windows.isEmpty else { throw .limitsUnavailable }
+            guard !windows.isEmpty else { throw .temporarilyUnavailable }
             return Limits(windows: windows)
         }
         throw .noResponse

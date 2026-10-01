@@ -17,7 +17,7 @@ public actor JSONRPCClient {
 
     private enum RequestOutcome {
         case success(JSONValue)
-        case failure(code: Int)
+        case failure(code: Int, authenticationRejected: Bool)
     }
 
     private let transport: any JSONRPCTransport
@@ -513,9 +513,11 @@ public actor JSONRPCClient {
         case .success(let result):
             pending.continuation.yield(result)
             pending.continuation.finish()
-        case .failure(let code):
+        case .failure(let code, let authenticationRejected):
             pending.continuation.finish(
-                throwing: JSONRPCError.remoteError(code: code)
+                throwing: authenticationRejected
+                    ? JSONRPCError.remoteAuthenticationRejected
+                    : JSONRPCError.remoteError(code: code)
             )
         }
     }
@@ -624,8 +626,8 @@ public actor JSONRPCClient {
         case .success(let id, let result):
             try receive(.success(result), for: id)
 
-        case .failure(let id, let code):
-            try receive(.failure(code: code), for: id)
+        case .failure(let id, let code, let authenticationRejected):
+            try receive(.failure(code: code, authenticationRejected: authenticationRejected), for: id)
         }
     }
 

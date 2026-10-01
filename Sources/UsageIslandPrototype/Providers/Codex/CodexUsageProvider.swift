@@ -344,6 +344,11 @@ actor CodexUsageProvider: UsageProvider {
         guard let error = error as? JSONRPCError else {
             return .appServerFailure(.transport)
         }
+        // An expired or invalidated ChatGPT sign-in: the user must run
+        // `codex login`; restarting the app-server would not help.
+        if error == .remoteAuthenticationRejected {
+            return .notAuthenticated
+        }
 
         let failure: CodexAppServerFailure
         switch error {
@@ -366,7 +371,7 @@ actor CodexUsageProvider: UsageProvider {
              .invalidInitializeResponse, .unknownResponseID,
              .invalidPendingRequestLimit, .invalidRequestTimeout:
             failure = .protocolViolation
-        case .remoteError:
+        case .remoteError, .remoteAuthenticationRejected:
             failure = .remote
         case .processExited, .processTerminationFailed,
              .requestCancelled, .transportClosed:

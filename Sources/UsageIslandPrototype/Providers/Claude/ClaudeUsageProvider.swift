@@ -10,6 +10,8 @@ enum ClaudeUsageError: Error, Equatable, Sendable {
     case noPlanLimits
     /// The CLI ran but gave no usable answer (often: not signed in).
     case queryFailed
+    /// Plan limits apply but none were available this time.
+    case temporarilyUnavailable
 }
 
 extension ClaudeUsageError: ProviderIssueReporting {
@@ -18,16 +20,17 @@ extension ClaudeUsageError: ProviderIssueReporting {
         case .cliNotFound: .notInstalled
         case .noPlanLimits: .noPlanLimits
         case .queryFailed: .notSignedIn
-        case .notConnected, .invalidRecord: .unavailable
+        case .notConnected, .invalidRecord, .temporarilyUnavailable: .unavailable
         }
     }
 }
 
 /// Claude plan limits from the installed Claude Code CLI's structured
 /// `/usage` answer, which covers every surface (terminal, desktop app,
-/// claude.ai). It is queried at most once per `queryInterval`, like Codex is
-/// polled, so neither provider needs any setup. Nothing is estimated and no
-/// credentials are read.
+/// claude.ai). Claude's usage service throttles frequent reads, so the CLI is
+/// asked at most once per `queryInterval`, and after failed answers the wait
+/// doubles (up to `maximumBackoff`) until one succeeds. Nothing is estimated
+/// and no credentials are read.
 actor ClaudeUsageProvider: UsageProvider {
     nonisolated let id: ProviderID = .claude
     private static let shortWindowDuration = 300
@@ -36,6 +39,8 @@ actor ClaudeUsageProvider: UsageProvider {
     /// A reading older than this may miss recent usage, so it is stale.
     private let freshnessInterval: TimeInterval
     private let queryInterval: TimeInterval
+    private let maximumBackoff: TimeInterval
+    private var consecutiveFailures = 0
     private let makeQuery: @Sendable () -> (any ClaudeUsageQuerying)?
     private var lastQueryAttempt: Date?
     private var queried: (limits: ClaudeUsageResponseParser.Limits, capturedAt: Date)?
@@ -46,12 +51,14 @@ actor ClaudeUsageProvider: UsageProvider {
     init(
         clock: any UsageClock,
         freshnessInterval: TimeInterval = 15 * 60,
-        queryInterval: TimeInterval = 120,
+        queryInterval: TimeInterval = 300,
+        maximumBackoff: TimeInterval = 3_600,
         makeQuery: @escaping @Sendable () -> (any ClaudeUsageQuerying)? = { nil }
     ) {
         self.clock = clock
         self.freshnessInterval = freshnessInterval
         self.queryInterval = queryInterval
+        self.maximumBackoff = max(queryInterval, maximumBackoff)
         self.makeQuery = makeQuery
     }
 
@@ -75,7 +82,7 @@ actor ClaudeUsageProvider: UsageProvider {
     private func refreshQueryIfDue() async {
         if let inFlightQuery { return await inFlightQuery.value }
         let now = clock.now()
-        if let lastQueryAttempt, now.timeIntervalSince(lastQueryAttempt) < queryInterval { return }
+        if let lastQueryAttempt, now.timeIntervalSince(lastQueryAttempt) < currentWait { return }
         lastQueryAttempt = now
         guard let query = makeQuery() else {
             lastQueryError = .cliNotFound
@@ -86,7 +93,11 @@ actor ClaudeUsageProvider: UsageProvider {
                 let limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
                 self.store(limits)
             } catch let failure as ClaudeUsageResponseParser.Failure {
-                self.noteQueryFailure(failure == .limitsUnavailable ? .noPlanLimits : .queryFailed)
+                switch failure {
+                case .limitsUnavailable: self.noteQueryFailure(.noPlanLimits)
+                case .temporarilyUnavailable: self.noteQueryFailure(.temporarilyUnavailable)
+                case .noResponse, .requestFailed: self.noteQueryFailure(.queryFailed)
+                }
             } catch {
                 self.noteQueryFailure(.queryFailed)
             }
@@ -96,13 +107,21 @@ actor ClaudeUsageProvider: UsageProvider {
         inFlightQuery = nil
     }
 
+    /// The wait before the next query: the normal interval, doubled for
+    /// each failed answer in a row, capped at `maximumBackoff`.
+    var currentWait: TimeInterval {
+        min(queryInterval * pow(2, Double(min(consecutiveFailures, 10))), maximumBackoff)
+    }
+
     private func store(_ limits: ClaudeUsageResponseParser.Limits) {
         queried = (limits, clock.now())
         lastQueryError = nil
+        consecutiveFailures = 0
     }
 
     private func noteQueryFailure(_ error: ClaudeUsageError) {
         lastQueryError = error
+        consecutiveFailures += 1
     }
 
     static func snapshot(

@@ -147,6 +147,33 @@ final class JSONRPCClientTests: XCTestCase {
         try await client.shutdown()
     }
 
+    func testRejectedSignInIsReportedWithoutItsMessage() async throws {
+        let transport = FakeJSONRPCTransport()
+        let client = JSONRPCClient(transport: transport)
+        try await client.start()
+        let requestTask = makeTrackedTask {
+            try await client.request(method: "account/rateLimits/read")
+        }
+        let outbound = try decodeOutbound(try await transport.dataSent(at: 0))
+
+        await transport.emit(
+            try errorResponse(
+                id: XCTUnwrap(outbound.id),
+                code: -32_603,
+                message: "GET https://example.invalid/usage failed: 401 Unauthorized; body={\"code\":\"token_invalidated\",\"user\":\"someone@example.com\"}"
+            )
+        )
+
+        do {
+            _ = try await boundedValue(of: requestTask)
+            XCTFail("Expected a rejected sign-in")
+        } catch {
+            XCTAssertEqual(error as? JSONRPCError, .remoteAuthenticationRejected)
+            XCTAssertFalse(error.localizedDescription.contains("someone@example.com"))
+        }
+        try await client.shutdown()
+    }
+
     func testRemoteErrorDiscardsSensitiveMessage() async throws {
         let transport = FakeJSONRPCTransport()
         let client = JSONRPCClient(transport: transport)
