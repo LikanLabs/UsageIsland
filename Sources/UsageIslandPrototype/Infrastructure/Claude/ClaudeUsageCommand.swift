@@ -10,6 +10,14 @@ enum ClaudeUsageCommandError: Error, Equatable, Sendable {
 /// (`get_usage` control request) and returns the raw stream-json output.
 protocol ClaudeUsageQuerying: Sendable {
     func queryUsage() async throws -> Data
+    /// Makes Claude Code fetch fresh limits from its service. `get_usage`
+    /// only reports what Claude Code already holds, which expires after a
+    /// while without use; the `/usage` command fetches them again.
+    func refreshLimits() async throws
+}
+
+extension ClaudeUsageQuerying {
+    func refreshLimits() async throws {}
 }
 
 /// One short-lived `claude -p` process per query, using the CLI's own
@@ -23,11 +31,14 @@ protocol ClaudeUsageQuerying: Sendable {
 struct ClaudeUsageCommand: ClaudeUsageQuerying {
     static let requestID = "usage-island"
     static let request = Data(#"{"type":"control_request","request_id":"usage-island","request":{"subtype":"get_usage","skip_behaviors":true}}"#.utf8 + [0x0A])
-    static let arguments = [
-        "-p", "--verbose", "--restricted", "--strict-mcp-config",
-        "--no-session-persistence", "--tools", "",
+    /// Isolation shared by both commands: no user settings (so no hooks or
+    /// status line), no MCP servers, no tools, no saved session.
+    static let isolation = ["--restricted", "--strict-mcp-config", "--no-session-persistence", "--tools", ""]
+    static let arguments = ["-p", "--verbose"] + isolation + [
         "--input-format", "stream-json", "--output-format", "stream-json",
     ]
+    /// The local `/usage` command: no model request, no tokens.
+    static let refreshArguments = ["-p", "/usage", "--output-format", "json"] + isolation
 
     static func environment(from base: [String: String]) -> [String: String] {
         var environment = base
@@ -41,6 +52,14 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
     var maximumOutputBytes = 1_048_576
 
     func queryUsage() async throws -> Data {
+        try await launch(arguments: Self.arguments, input: Self.request)
+    }
+
+    func refreshLimits() async throws {
+        _ = try await launch(arguments: Self.refreshArguments, input: Data())
+    }
+
+    private func launch(arguments: [String], input: Data) async throws -> Data {
         let executableURL = executableURL
         let timeout = timeout
         let limit = maximumOutputBytes
@@ -48,13 +67,15 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
             // Blocking pipe reads stay off the cooperative thread pool.
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(with: Result {
-                    try Self.run(executableURL: executableURL, timeout: timeout, limit: limit)
+                    try Self.run(executableURL: executableURL, arguments: arguments, request: input,
+                                 timeout: timeout, limit: limit)
                 })
             }
         }
     }
 
-    private static func run(executableURL: URL, timeout: TimeInterval, limit: Int) throws -> Data {
+    private static func run(executableURL: URL, arguments: [String], request: Data,
+                            timeout: TimeInterval, limit: Int) throws -> Data {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
@@ -79,7 +100,7 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         defer { deadline.cancel() }
 
         // Closing stdin after the request makes the CLI answer and exit.
-        try? input.fileHandleForWriting.write(contentsOf: request)
+        if !request.isEmpty { try? input.fileHandleForWriting.write(contentsOf: request) }
         try? input.fileHandleForWriting.close()
 
         var data = Data()

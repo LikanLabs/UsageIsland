@@ -24,10 +24,40 @@ final class ClaudeTemporaryFailureTests: XCTestCase {
         XCTAssertEqual(ClaudeUsageError.temporarilyUnavailable.issue, .unavailable)
     }
 
+    func testAnEmptyAnswerMakesClaudeCodeFetchFreshLimitsOnce() async throws {
+        let clock = MovableClock(base)
+        let query = QueuedQuery([withoutLimits, withLimits])
+        let provider = ClaudeUsageProvider(clock: clock, makeQuery: { query })
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.preferredWindow.usedPercent, 26)
+        let refreshes = await query.refreshes
+        let calls = await query.calls
+        XCTAssertEqual(refreshes, 1)
+        XCTAssertEqual(calls, 2, "asked again right after the refresh")
+    }
+
+    func testFreshLimitsAreFetchedAtMostOncePer20Minutes() async throws {
+        let clock = MovableClock(base)
+        let query = QueuedQuery([])  // always empty
+        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600,
+                                           limitsRefreshInterval: 1_200, makeQuery: { query })
+        _ = try? await provider.fetchUsage()                      // refresh #1
+        clock.advance(600)
+        _ = try? await provider.fetchUsage()                      // too soon: no refresh
+        var refreshes = await query.refreshes
+        XCTAssertEqual(refreshes, 1)
+        clock.advance(1_200)
+        _ = try? await provider.fetchUsage()                      // allowed again
+        refreshes = await query.refreshes
+        XCTAssertEqual(refreshes, 2)
+    }
+
     func testFailuresBackOffAndASuccessResetsTheInterval() async throws {
         let clock = MovableClock(base)
-        let query = QueuedQuery([withoutLimits, withoutLimits, withLimits, withLimits])
-        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600, makeQuery: { query })
+        // The first attempt also tries a refresh, so it asks twice.
+        let query = QueuedQuery([withoutLimits, withoutLimits, withoutLimits, withLimits, withLimits])
+        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600,
+                                           limitsRefreshInterval: 86_400, makeQuery: { query })
 
         _ = try? await provider.fetchUsage()                      // fails: next wait 10 min
         var wait = await provider.currentWait
@@ -35,7 +65,7 @@ final class ClaudeTemporaryFailureTests: XCTestCase {
         clock.advance(599)
         _ = try? await provider.fetchUsage()
         var calls = await query.calls
-        XCTAssertEqual(calls, 1, "still backing off")
+        XCTAssertEqual(calls, 2, "still backing off")
 
         clock.advance(1)
         _ = try? await provider.fetchUsage()                      // fails again: 20 min
@@ -48,12 +78,14 @@ final class ClaudeTemporaryFailureTests: XCTestCase {
         wait = await provider.currentWait
         XCTAssertEqual(wait, 300)
         calls = await query.calls
-        XCTAssertEqual(calls, 3)
+        XCTAssertEqual(calls, 4)
+        let refreshes = await query.refreshes
+        XCTAssertEqual(refreshes, 1)
     }
 
     func testBackoffIsCappedAtTheMaximum() async throws {
         let clock = MovableClock(base)
-        let query = QueuedQuery(Array(repeating: withoutLimits, count: 12))
+        let query = QueuedQuery(Array(repeating: withoutLimits, count: 24))
         let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600, makeQuery: { query })
         for _ in 0..<8 {
             _ = try? await provider.fetchUsage()
@@ -141,11 +173,13 @@ private final class MovableClock: UsageClock, @unchecked Sendable {
 private actor QueuedQuery: ClaudeUsageQuerying {
     private var answers: [Data]
     private(set) var calls = 0
+    private(set) var refreshes = 0
     init(_ answers: [Data]) { self.answers = answers }
     func queryUsage() async throws -> Data {
         calls += 1
         return answers.isEmpty ? withoutLimits : answers.removeFirst()
     }
+    func refreshLimits() async throws { refreshes += 1 }
 }
 
 private actor RejectingCodexClient: CodexUsageClient {

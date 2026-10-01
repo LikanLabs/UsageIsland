@@ -125,7 +125,9 @@ asks it for the rate limits over JSON-RPC, once a minute and whenever you open
 the panel. The CLI uses its own sign-in.
 
 **Claude Code.** Every five minutes, and when you open the panel, the app asks
-the installed `claude` CLI for its structured `/usage` data. The query runs
+the installed `claude` CLI for its structured `/usage` data. If Claude Code
+has no fresh limits to report (after a while without using it), the app runs
+the local `/usage` command once to fetch them, at most every 20 minutes. The query runs
 isolated (`--restricted`, no MCP servers, no tools, no saved session), sends
 no prompt and uses no tokens. The numbers come from your account, so they
 include the terminal, the Claude desktop app and claude.ai.

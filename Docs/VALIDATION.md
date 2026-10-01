@@ -1,3 +1,15 @@
+# Validation — 2026-10-01 (Claude limits expire while idle)
+
+- Root cause of the missing Claude usage: `get_usage` returns only the limits
+  Claude Code already holds; after hours without use it answered
+  `rate_limits: null` three times in a row, while the text `/usage` command
+  fetched them (session 21 %, week 9 %). Right after it, `get_usage` returned
+  data with every flag combination, including the app's.
+- Fix: on an empty answer, run `/usage` with the same isolation (0 tokens,
+  0 turns, about 0.4 s) and ask again, at most every 20 minutes. Live test
+  against the real account returned session and weekly windows.
+- `swift test`: 287 tests pass.
+
 # Validation — 2026-10-01 (stuck panel, Claude throttling, expired Codex sign-in)
 
 - Found in real use after 12 hours: the panel stayed "open" in the model

@@ -123,7 +123,11 @@ synthetic demo providers are outside the product scope.
   `DISABLE_AUTOUPDATER=1`.
 - The `get_usage` shape is experimental; parse strictly and fall back to the
   last valid reading. `rate_limits_available: false` means no plan limits;
-  `rate_limits: null` with plan limits available is a temporary failure. Read limits from its ordered `limits` rows, classified
+  `rate_limits: null` with plan limits available is a temporary failure.
+- `get_usage` only reports the limits Claude Code already holds, which
+  expire after a while without use. On an empty answer, run the local
+  `/usage` command once (same isolation, no tokens) and ask again; do that at
+  most every 20 minutes. Read limits from its ordered `limits` rows, classified
   only by `kind` (`session`, `weekly_all`, `weekly_scoped` with its scope
   name); skip unknown kinds instead of guessing.
 - Store only the rate-limit percentages, reset times and capture time.

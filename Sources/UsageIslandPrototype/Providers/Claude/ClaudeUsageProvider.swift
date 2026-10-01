@@ -41,6 +41,10 @@ actor ClaudeUsageProvider: UsageProvider {
     private let queryInterval: TimeInterval
     private let maximumBackoff: TimeInterval
     private var consecutiveFailures = 0
+    /// How often an empty answer may make Claude Code fetch fresh limits,
+    /// which reaches Claude's usage service.
+    private let limitsRefreshInterval: TimeInterval
+    private var lastLimitsRefresh: Date?
     private let makeQuery: @Sendable () -> (any ClaudeUsageQuerying)?
     private var lastQueryAttempt: Date?
     private var queried: (limits: ClaudeUsageResponseParser.Limits, capturedAt: Date)?
@@ -53,12 +57,14 @@ actor ClaudeUsageProvider: UsageProvider {
         freshnessInterval: TimeInterval = 15 * 60,
         queryInterval: TimeInterval = 300,
         maximumBackoff: TimeInterval = 3_600,
+        limitsRefreshInterval: TimeInterval = 20 * 60,
         makeQuery: @escaping @Sendable () -> (any ClaudeUsageQuerying)? = { nil }
     ) {
         self.clock = clock
         self.freshnessInterval = freshnessInterval
         self.queryInterval = queryInterval
         self.maximumBackoff = max(queryInterval, maximumBackoff)
+        self.limitsRefreshInterval = limitsRefreshInterval
         self.makeQuery = makeQuery
     }
 
@@ -90,7 +96,16 @@ actor ClaudeUsageProvider: UsageProvider {
         }
         let task = Task {
             do {
-                let limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
+                let limits: ClaudeUsageResponseParser.Limits
+                do {
+                    limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
+                } catch ClaudeUsageResponseParser.Failure.temporarilyUnavailable where self.mayRefreshLimits() {
+                    // Claude Code's copy of the limits expired while it was
+                    // idle: have it fetch them, then ask again.
+                    self.noteLimitsRefresh()
+                    try? await query.refreshLimits()
+                    limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
+                }
                 self.store(limits)
             } catch let failure as ClaudeUsageResponseParser.Failure {
                 switch failure {
@@ -111,6 +126,15 @@ actor ClaudeUsageProvider: UsageProvider {
     /// each failed answer in a row, capped at `maximumBackoff`.
     var currentWait: TimeInterval {
         min(queryInterval * pow(2, Double(min(consecutiveFailures, 10))), maximumBackoff)
+    }
+
+    private func mayRefreshLimits() -> Bool {
+        guard let lastLimitsRefresh else { return true }
+        return clock.now().timeIntervalSince(lastLimitsRefresh) >= limitsRefreshInterval
+    }
+
+    private func noteLimitsRefresh() {
+        lastLimitsRefresh = clock.now()
     }
 
     private func store(_ limits: ClaudeUsageResponseParser.Limits) {
