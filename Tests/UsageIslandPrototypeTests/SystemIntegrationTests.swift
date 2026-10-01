@@ -169,10 +169,17 @@ final class AppUpdateRelaunchTests: XCTestCase {
 }
 
 final class ClaudeQueryEnvironmentTests: XCTestCase {
-    func testClaudeQueriesSkipUpdatesAndNonEssentialTraffic() {
-        let environment = ClaudeUsageCommand.environment(from: ["PATH": "/usr/bin", "HOME": "/Users/example"])
-        XCTAssertEqual(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
+    func testClaudeQueriesSkipUpdatesAndTelemetryButMayFetchLimits() {
+        let environment = ClaudeUsageCommand.environment(from: [
+            "PATH": "/usr/bin", "HOME": "/Users/example",
+            // Even if the user's environment sets it, it must not reach the
+            // query: it stops Claude Code from fetching expired limits.
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        ])
+        XCTAssertNil(environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"])
         XCTAssertEqual(environment["DISABLE_AUTOUPDATER"], "1")
+        XCTAssertEqual(environment["DISABLE_TELEMETRY"], "1")
+        XCTAssertEqual(environment["DISABLE_ERROR_REPORTING"], "1")
         XCTAssertEqual(environment["HOME"], "/Users/example")
     }
 }

@@ -26,8 +26,11 @@ extension ClaudeUsageQuerying {
 /// `--strict-mcp-config` starts no MCP servers, `--tools ""` offers no tools
 /// and `--no-session-persistence` saves no transcript. No prompt is sent, so
 /// no model request is made and no tokens are used. The app runs this every
-/// couple of minutes, so the child also skips Claude Code's update checks
-/// and non-essential traffic (telemetry, error reports).
+/// few minutes, so the child skips Claude Code's update checks, telemetry
+/// and error reports. It must not set
+/// `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`: Claude Code counts fetching
+/// plan limits as non-essential, so with it set, limits that expired while
+/// Claude Code sat idle are never fetched again.
 struct ClaudeUsageCommand: ClaudeUsageQuerying {
     static let requestID = "usage-island"
     static let request = Data(#"{"type":"control_request","request_id":"usage-island","request":{"subtype":"get_usage","skip_behaviors":true}}"#.utf8 + [0x0A])
@@ -42,8 +45,10 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
 
     static func environment(from base: [String: String]) -> [String: String] {
         var environment = base
-        environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        environment.removeValue(forKey: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
         environment["DISABLE_AUTOUPDATER"] = "1"
+        environment["DISABLE_TELEMETRY"] = "1"
+        environment["DISABLE_ERROR_REPORTING"] = "1"
         return environment
     }
 

@@ -1,3 +1,14 @@
+# Validation — 2026-10-01 (Claude limits never refreshed)
+
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (added in 0.1.7) stops Claude
+  Code from fetching plan limits: with it, `get_usage` kept returning the
+  same saved reading for 50 minutes (and `null` once the reading was gone),
+  so new use, for example of Fable, never showed. Without it, the same query
+  fetched fresh limits at once (saved 0.0 minutes earlier): session 58 %,
+  week 14 % and the Fable weekly row at 4 %.
+- Queries now disable only auto-update, telemetry and error reporting.
+- `swift test`: 287 tests pass.
+
 # Validation — 2026-10-01 (Claude limits expire while idle)
 
 - Root cause of the missing Claude usage: `get_usage` returns only the limits

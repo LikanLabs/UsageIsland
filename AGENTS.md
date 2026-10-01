@@ -119,8 +119,10 @@ synthetic demo providers are outside the product scope.
   request, run isolated with `--restricted`, `--strict-mcp-config`,
   `--tools ""` and `--no-session-persistence`, no prompt, at most every five
   minutes (doubling after each failed answer, up to an hour, because Claude's
-  usage service throttles frequent reads), with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and
-  `DISABLE_AUTOUPDATER=1`.
+  usage service throttles frequent reads), with `DISABLE_AUTOUPDATER=1`,
+  `DISABLE_TELEMETRY=1` and `DISABLE_ERROR_REPORTING=1`. Never set
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`: Claude Code then stops fetching
+  plan limits once its saved copy expires.
 - The `get_usage` shape is experimental; parse strictly and fall back to the
   last valid reading. `rate_limits_available: false` means no plan limits;
   `rate_limits: null` with plan limits available is a temporary failure.

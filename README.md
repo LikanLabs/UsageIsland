@@ -112,7 +112,7 @@ restart.
 
 **Battery.** Polling pauses while the screen is locked or the displays sleep,
 and slows down in Low Power Mode. The Claude query runs with Claude Code's
-update checks and non-essential traffic turned off.
+update checks, telemetry and error reports turned off.
 
 **Old readings.** If a refresh fails, the last value stays on screen with a
 dashed ring and a "last known usage" note; it is never replaced by a made-up
