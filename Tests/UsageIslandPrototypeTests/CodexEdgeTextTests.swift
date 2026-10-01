@@ -130,6 +130,24 @@ final class CodexEdgeTextTests: XCTestCase {
         XCTAssertFalse(unknown.hasReset(at: now))
     }
 
+    func testRunsOutForecastReadsAsASentence() throws {
+        let english = try makePreferences(.english)
+        let spanish = try makePreferences(.spanish)
+        let calendar = Calendar.current
+        let afternoon = try XCTUnwrap(calendar.date(bySettingHour: 16, minute: 40, second: 0, of: Date()))
+        XCTAssertEqual(CodexEdgeText.runsOutText(title: "Session", date: afternoon, preferences: english),
+                       "Session: runs out by \(CodexEdgeText.forecastTime(afternoon, preferences: english)) at this pace")
+        XCTAssertEqual(CodexEdgeText.runsOutText(title: "Sesión", date: afternoon, preferences: spanish),
+                       "Sesión: a este ritmo se agota a las \(CodexEdgeText.forecastTime(afternoon, preferences: spanish))")
+        // One o'clock takes the singular article, on a 12- or 24-hour clock.
+        let oneAM = try XCTUnwrap(calendar.date(bySettingHour: 1, minute: 5, second: 0, of: Date()))
+        XCTAssertTrue(CodexEdgeText.runsOutText(title: "Sesión", date: oneAM, preferences: spanish)
+            .hasPrefix("Sesión: a este ritmo se agota a la 1"))
+        let later = try XCTUnwrap(calendar.date(byAdding: .day, value: 2, to: afternoon))
+        XCTAssertEqual(CodexEdgeText.runsOutText(title: "Semana Fable", date: later, preferences: spanish),
+                       "Semana Fable: a este ritmo se agota el \(CodexEdgeText.forecastTime(later, preferences: spanish))")
+    }
+
     private func makePreferences(_ language: AppLanguage) throws -> AppPreferences {
         let suite = "UsageIsland.text.tests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

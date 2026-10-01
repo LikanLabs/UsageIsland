@@ -1,3 +1,20 @@
+# Validation — 2026-10-01 (README GIF, English dates, forecast wording)
+
+- Claude's reset times jitter by fractions of a second between readings, so
+  the same weekly reset showed as 1:00 in one reading and 12:59 in the next.
+  They are now rounded to the minute.
+- In English, two long reset dates in a row of three gauges ran into each
+  other ("Thu 8, 12:59 AMThu 8, 12:59 AM"). A date that does not fit its
+  column now shrinks slightly, like the gauge titles; Spanish is unchanged.
+- The forecast line reads as a sentence: "Session: runs out by 8:07 PM at
+  this pace" and "Sesión: a este ritmo se agota a las 20:07" ("a la 1:05",
+  "el jue 14:00" on another day).
+- The README GIF was recorded from the real app (a local build with these
+  fixes, in English) over a plain gradient, without the cursor, using
+  ScreenCaptureKit, and converted with `Scripts/make-readme-gif.swift`.
+- `swift test`: 289 tests pass. `./Scripts/verify-resilience.sh`: 12 checks
+  pass.
+
 # Validation — 2026-10-01 (Claude limits never refreshed)
 
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (added in 0.1.7) stops Claude

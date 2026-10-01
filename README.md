@@ -8,6 +8,10 @@
 
 **Your Codex and Claude Code limits, always one glance away.**
 
+<p align="center">
+  <img src="Docs/demo.gif" width="347" alt="Clicking the Usage Island pill on the right edge of the screen opens a glass panel with Codex and Claude Code usage rings, including Claude's Fable weekly limit.">
+</p>
+
 Usage Island is a small native macOS app that sits beside the MacBook notch
 (or on the left or right edge of the screen) and shows how much of your
 subscription limits you have left:
@@ -99,7 +103,7 @@ otherwise **weekly**. When that limit is used up, it shows the time left until
 it resets instead of "0%".
 
 **Will it last?** While you are using a tool, its card adds a one-line
-estimate from your last half hour: "Session: runs out ~16:40 at this pace",
+estimate from your last half hour: "Session: runs out by 16:40 at this pace",
 or "At this pace it lasts until the reset". It is only an estimate from the
 official percentages; it disappears when you stop.
 

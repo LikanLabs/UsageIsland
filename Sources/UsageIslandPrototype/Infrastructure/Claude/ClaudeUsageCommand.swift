@@ -208,10 +208,14 @@ enum ClaudeUsageResponseParser {
         }
     }
 
+    /// Claude's reset times jitter by fractions of a second between readings
+    /// (03:59:59.6 one time, 04:00:00.1 the next), so they are rounded to the
+    /// minute: a reset at 1:00 never shows as 12:59.
     static func date(_ text: String) -> Date? {
         let precise = ISO8601DateFormatter()
         precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return precise.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+        guard let date = precise.date(from: text) ?? ISO8601DateFormatter().date(from: text) else { return nil }
+        return Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded() * 60)
     }
 }
 

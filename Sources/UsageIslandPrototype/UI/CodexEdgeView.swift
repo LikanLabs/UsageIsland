@@ -486,8 +486,7 @@ struct CodexUsageDetailView: View {
         let color: Color
         switch forecast.outcome {
         case .runsOut(let date):
-            let time = CodexEdgeText.forecastTime(date, preferences: preferences)
-            text = preferences.text("\(title): runs out ~\(time) at this pace", "\(title): se agota ~\(time) a este ritmo")
+            text = CodexEdgeText.runsOutText(title: title, date: date, preferences: preferences)
             color = .orange
         case .lastsUntilReset:
             text = preferences.text("At this pace it lasts until the reset", "A este ritmo te alcanza hasta el reinicio")
@@ -601,8 +600,12 @@ struct CodexUsageDetailView: View {
             .padding(.bottom, 2)
             Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.8)
+            // Long dates ("Thu 8, 12:59 AM" beside two other gauges) shrink
+            // a little instead of running into the next column.
             Text(CodexEdgeText.compactResetLabel(window.resetsAt, now: now, preferences: preferences))
                 .font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.horizontal, 3)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -647,6 +650,17 @@ enum CodexEdgeText {
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    /// "Session: runs out by 16:40 at this pace" / "Sesión: a este ritmo se
+    /// agota a las 16:40" ("a la 1:05", or "el jue 14:00" on another day).
+    static func runsOutText(title: String, date: Date, preferences: AppPreferences) -> String {
+        let time = forecastTime(date, preferences: preferences)
+        let article = Calendar.current.isDateInToday(date)
+            ? (time.prefix(while: \.isNumber) == "1" ? "a la" : "a las")
+            : "el"
+        return preferences.text("\(title): runs out by \(time) at this pace",
+                                "\(title): a este ritmo se agota \(article) \(time)")
     }
 
     /// When a forecast runs out: "16:40" today, otherwise "Thu 14:00".

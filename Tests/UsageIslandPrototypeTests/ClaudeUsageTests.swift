@@ -168,10 +168,19 @@ final class ClaudeUsageResponseParserTests: XCTestCase {
         let limits = try ClaudeUsageResponseParser.limits(from: usageOutput(five: 27, week: 4.5))
         XCTAssertEqual(limits.windows.map(\.durationMinutes), [300, 10_080])
         XCTAssertEqual(limits.windows[0].usedPercentage, 27)
-        XCTAssertEqual(limits.windows[0].resetsAt?.timeIntervalSince1970 ?? 0, 1_700_003_600.141, accuracy: 0.01)
+        // 23:13:20.141 and 11:46:40, rounded to the minute.
+        XCTAssertEqual(limits.windows[0].resetsAt, Date(timeIntervalSince1970: 1_700_003_580))
         XCTAssertEqual(limits.windows[1].usedPercentage, 4.5)
-        XCTAssertEqual(limits.windows[1].resetsAt, Date(timeIntervalSince1970: 1_700_480_800))
+        XCTAssertEqual(limits.windows[1].resetsAt, Date(timeIntervalSince1970: 1_700_480_820))
         XCTAssertEqual(limits.windows.map(\.scope), [nil, nil])
+    }
+
+    func testResetTimesIgnoreSubSecondJitter() {
+        let hour = Date(timeIntervalSince1970: 1_700_020_800) // 2023-11-15T04:00:00Z
+        XCTAssertEqual(ClaudeUsageResponseParser.date("2023-11-15T03:59:59.6+00:00"), hour)
+        XCTAssertEqual(ClaudeUsageResponseParser.date("2023-11-15T04:00:00.2+00:00"), hour)
+        XCTAssertEqual(ClaudeUsageResponseParser.date("2023-11-15T04:00:00Z"), hour)
+        XCTAssertNil(ClaudeUsageResponseParser.date("not a date"))
     }
 
     func testOrderedLimitRowsIncludePerModelWeeklyLimits() throws {
