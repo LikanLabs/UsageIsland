@@ -28,6 +28,7 @@ public final class AppModel: ObservableObject {
     /// provider that is actually in use now.
     private let activityCutoff: Date
     private var lastActivity: [ProviderID: Date] = [:]
+    private var forecaster = UsageForecaster()
     private var providerAdapters: [any UsageProvider]
     private var refreshTask: Task<Void, Never>?
     private var refreshGeneration = 0
@@ -122,6 +123,13 @@ public final class AppModel: ObservableObject {
     /// The provider the pill represents, even before any reading exists.
     public var pillProviderID: ProviderID? {
         displayedProviderID ?? visibleProviderIDs.first
+    }
+
+    /// "Will it last?" for a provider's card, from its recent official
+    /// readings; nil when there is no recent use to project.
+    func forecast(for provider: ProviderID) -> UsageForecast? {
+        guard let snapshot = snapshot(for: provider), snapshot.freshness == .fresh else { return nil }
+        return forecaster.headline(for: snapshot, now: clock.now())
     }
 
     public func snapshot(for provider: ProviderID) -> UsageSnapshot? {
@@ -253,6 +261,7 @@ public final class AppModel: ObservableObject {
                     lastActivity[result.id] = activity
                 }
                 snapshotsByID[result.id] = snapshot
+                forecaster.record(snapshot)
                 successfulCapturedDates.append(snapshot.capturedAt)
             } else if var previous = snapshotsByID[result.id] {
                 previous.freshness = .stale

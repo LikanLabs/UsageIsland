@@ -92,6 +92,9 @@ synthetic demo providers are outside the product scope.
 - Clamp percentages to `0...100`.
 - Use absolute reset dates internally.
 - Never infer official quota percentages from token totals or local cost logs.
+- Forecasts ("runs out ~16:40 at this pace") extrapolate only official
+  readings from the last half hour, appear only during recent use, and are
+  always worded as estimates, never as quota figures.
 - Preserve the last valid snapshot when refresh fails.
 - Mark old values as stale instead of replacing them with fake values.
 - Never present demo data as real data.

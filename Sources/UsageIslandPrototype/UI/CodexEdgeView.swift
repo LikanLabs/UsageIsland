@@ -46,11 +46,15 @@ enum CodexEdgeLayout {
         }
     }
 
+    /// The "will it last?" line, shown only while there is recent use.
+    static let forecastLineHeight: CGFloat = 24
+
     /// Height of one provider card, including its padding and header.
-    static func cardHeight(provider: ProviderID, snapshot: UsageSnapshot?) -> CGFloat {
+    static func cardHeight(provider: ProviderID, snapshot: UsageSnapshot?, hasForecast: Bool = false) -> CGFloat {
         guard let snapshot else { return cardChrome + 44 }
         return cardChrome + CGFloat(gaugeRows(snapshot).count) * gaugesHeight
             + (snapshot.freshness == .stale ? staleNoteHeight : 0)
+            + (hasForecast ? forecastLineHeight : 0)
     }
 
     static let welcomeCardHeight: CGFloat = 146
@@ -62,7 +66,9 @@ enum CodexEdgeLayout {
         guard !providers.isEmpty else {
             return panelPadding * 2 + headerHeight + 14 + welcomeCardHeight + footerHeight
         }
-        let cards = providers.reduce(CGFloat(0)) { $0 + cardHeight(provider: $1, snapshot: model.snapshot(for: $1)) }
+        let cards = providers.reduce(CGFloat(0)) {
+            $0 + cardHeight(provider: $1, snapshot: model.snapshot(for: $1), hasForecast: model.forecast(for: $1) != nil)
+        }
         let spacing = CGFloat(max(providers.count - 1, 0)) * cardSpacing
         return panelPadding * 2 + headerHeight + 14 + cards + spacing + footerHeight
     }
@@ -444,6 +450,9 @@ struct CodexUsageDetailView: View {
                         .frame(height: CodexEdgeLayout.gaugesHeight, alignment: .top)
                     }
                 }
+                if let forecast = model.forecast(for: provider) {
+                    forecastLine(forecast)
+                }
                 if snapshot.freshness == .stale {
                     Label(preferences.text("Last known usage · update pending", "Último consumo conocido · pendiente de actualizar"),
                           systemImage: "clock.arrow.circlepath")
@@ -458,9 +467,33 @@ struct CodexUsageDetailView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: CodexEdgeLayout.cardHeight(provider: provider, snapshot: snapshot), alignment: .top)
+        .frame(height: CodexEdgeLayout.cardHeight(provider: provider, snapshot: snapshot,
+                                                  hasForecast: model.forecast(for: provider) != nil), alignment: .top)
         .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
+    }
+
+    /// An estimate from recent official readings, worded as one.
+    private func forecastLine(_ forecast: UsageForecast) -> some View {
+        let title = CodexEdgeText.windowTitle(forecast.window, preferences: preferences)
+        let text: String
+        let color: Color
+        switch forecast.outcome {
+        case .runsOut(let date):
+            let time = CodexEdgeText.forecastTime(date, preferences: preferences)
+            text = preferences.text("\(title): runs out ~\(time) at this pace", "\(title): se agota ~\(time) a este ritmo")
+            color = .orange
+        case .lastsUntilReset:
+            text = preferences.text("At this pace it lasts until the reset", "A este ritmo te alcanza hasta el reinicio")
+            color = .secondary
+        }
+        return Label(text, systemImage: "chart.line.uptrend.xyaxis")
+            .font(.system(size: 11)).foregroundStyle(color)
+            .lineLimit(1).minimumScaleFactor(0.85)
+            .frame(height: CodexEdgeLayout.forecastLineHeight - 10)
+            .help(preferences.text("Estimate from your recent usage; the official limit is the percentage above.",
+                                   "Estimación según tu consumo reciente; el límite oficial es el porcentaje de arriba."))
+            .accessibilityLabel(preferences.text("Estimate. ", "Estimación. ") + text)
     }
 
     /// Shown when neither CLI is installed: what the app needs, in one card.
@@ -598,6 +631,15 @@ enum CodexEdgeText {
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    /// When a forecast runs out: "16:40" today, otherwise "Thu 14:00".
+    static func forecastTime(_ date: Date, preferences: AppPreferences) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return date.formatted(.dateTime.hour().minute().locale(preferences.locale))
+        }
+        return date.formatted(.dateTime.weekday(.abbreviated).hour().minute().locale(preferences.locale))
     }
 
     /// Compact time left: "45 min", "1h 20m", "2d 4h".

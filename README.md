@@ -98,6 +98,11 @@ pill shows one limit and names it: **5 hours** when the plan has that window,
 otherwise **weekly**. When that limit is used up, it shows the time left until
 it resets instead of "0%".
 
+**Will it last?** While you are using a tool, its card adds a one-line
+estimate from your last half hour: "Session: runs out ~16:40 at this pace",
+or "At this pace it lasts until the reset". It is only an estimate from the
+official percentages; it disappears when you stop.
+
 **Alerts.** With **Alert when running low** on (the default), you get a macOS
 notification when a limit drops to 20 %, 10 % and 0 % left, and when a limit
 that had run low resets. Alerts are local; nothing is sent anywhere.
