@@ -16,8 +16,11 @@
 - New tests: `testAsksForPermissionOnceTheWelcomePageIsDoneEvenWithoutGetStarted`,
   `testShutdownQueuedBehindACompletedLaunchStillTerminatesTheChild`,
   `testACLIThatIgnoresSIGTERMIsKilledAfterTheGracePeriod`.
-- `swift test` and `./Scripts/verify-resilience.sh` were not run on the
-  review machine (Linux, no toolchain); run them on macOS before release.
+- CI on macos-26 (PR #3, commit 0dd61ee): build, `swift test` (292 tests,
+  0 failures; the 289 existing plus these 3) and
+  `./Scripts/verify-resilience.sh` all pass. The first run failed only
+  because the new shutdown test did not compile (a missing initializer
+  argument), fixed in that commit.
 
 # Validation — 2026-10-01 (README GIF, English dates, forecast wording)
 
