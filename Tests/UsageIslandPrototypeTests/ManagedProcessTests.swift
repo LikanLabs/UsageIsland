@@ -683,6 +683,7 @@ final class ManagedProcessTests: XCTestCase {
             forceActions: []
         )
         let shutdownGate = ControlledShutdownStartGate()
+        let sink = ControlledProcessInputSink()
         let process = ManagedProcess(
             configuration: .init(
                 executableURL: URL(fileURLWithPath: "/test/fake-child"),
@@ -691,6 +692,7 @@ final class ManagedProcessTests: XCTestCase {
             shutdownScheduler: ImmediateTimeoutScheduler(),
             processSignaler: signaler,
             processFactory: FakeManagedChildProcessFactory(child: child),
+            inputOperations: makeInputOperations(sink: sink),
             shutdownStartGate: {
                 await shutdownGate.wait()
             },
