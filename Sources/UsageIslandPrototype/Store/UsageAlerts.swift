@@ -108,13 +108,16 @@ final class UsageAlertMonitor {
                 MainActor.assumeIsolated { self?.evaluate(snapshots) }
             }
             .store(in: &subscriptions)
-        // Ask for permission when alerts are on, but not before the welcome
-        // page has explained why; it asks itself when the user finishes it.
+        // Ask for permission once alerts are on and the welcome page is
+        // done, whichever comes last: alerts start on, so a welcome page
+        // closed without "Get started" must still lead to the request,
+        // or every alert would be dropped with no sign in the settings.
         preferences.$usageAlerts
+            .combineLatest(preferences.$hasCompletedOnboarding) { $0 && $1 }
             .removeDuplicates()
-            .sink { [weak self] enabled in
+            .sink { [weak self] shouldAsk in
                 MainActor.assumeIsolated {
-                    guard let self, enabled, self.preferences.hasCompletedOnboarding else { return }
+                    guard let self, shouldAsk else { return }
                     let notifier = self.notifier
                     Task { _ = await notifier.requestAuthorization() }
                 }

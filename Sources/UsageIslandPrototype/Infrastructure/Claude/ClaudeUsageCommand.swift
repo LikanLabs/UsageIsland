@@ -54,6 +54,8 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
 
     let executableURL: URL
     var timeout: TimeInterval = 20
+    /// After SIGTERM, how long the CLI gets to exit before SIGKILL.
+    var killGracePeriod: TimeInterval = 5
     var maximumOutputBytes = 1_048_576
 
     func queryUsage() async throws -> Data {
@@ -67,20 +69,21 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
     private func launch(arguments: [String], input: Data) async throws -> Data {
         let executableURL = executableURL
         let timeout = timeout
+        let killGracePeriod = killGracePeriod
         let limit = maximumOutputBytes
         return try await withCheckedThrowingContinuation { continuation in
             // Blocking pipe reads stay off the cooperative thread pool.
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(with: Result {
                     try Self.run(executableURL: executableURL, arguments: arguments, request: input,
-                                 timeout: timeout, limit: limit)
+                                 timeout: timeout, killGracePeriod: killGracePeriod, limit: limit)
                 })
             }
         }
     }
 
     private static func run(executableURL: URL, arguments: [String], request: Data,
-                            timeout: TimeInterval, limit: Int) throws -> Data {
+                            timeout: TimeInterval, killGracePeriod: TimeInterval, limit: Int) throws -> Data {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
@@ -98,7 +101,7 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         let deadline = DispatchWorkItem {
             if process.isRunning {
                 timedOut.set()
-                process.terminate()
+                stop(process, killAfter: killGracePeriod)
             }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
@@ -113,7 +116,7 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         while let chunk = try? reader.read(upToCount: 65_536), !chunk.isEmpty {
             data.append(chunk)
             if data.count > limit {
-                process.terminate()
+                stop(process, killAfter: killGracePeriod)
                 process.waitUntilExit()
                 throw ClaudeUsageCommandError.outputTooLarge
             }
@@ -121,6 +124,17 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
         process.waitUntilExit()
         if timedOut.isSet { throw ClaudeUsageCommandError.timedOut }
         return data
+    }
+
+    /// SIGTERM, then SIGKILL if the CLI is still running after `grace`. A
+    /// child that ignored the first signal would otherwise block
+    /// `waitUntilExit` for good, and with it every later query and poll.
+    private static func stop(_ process: Process, killAfter grace: TimeInterval) {
+        guard process.isRunning else { return }
+        process.terminate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + grace) {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
     }
 }
 

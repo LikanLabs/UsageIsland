@@ -111,6 +111,30 @@ final class UsageAlertMonitorTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func testAsksForPermissionOnceTheWelcomePageIsDoneEvenWithoutGetStarted() async throws {
+        let notifier = RecordingNotifier()
+        let preferences = try makePreferences()
+        XCTAssertTrue(preferences.usageAlerts, "alerts start on")
+        XCTAssertFalse(preferences.hasCompletedOnboarding)
+        let model = AppModel.empty(clock: FixedAlertClock(start))
+        let monitor = UsageAlertMonitor(model: model, preferences: preferences, notifier: notifier, clock: FixedAlertClock(start))
+        monitor.start()
+        try await Task.sleep(for: .milliseconds(50))
+        var requests = await notifier.authorizationRequests
+        XCTAssertEqual(requests, 0, "not before the welcome page has explained why")
+
+        // Closing the welcome page without "Get started" also completes it.
+        preferences.hasCompletedOnboarding = true
+        try await notifier.waitForAuthorizationRequests(1)
+
+        preferences.usageAlerts = false
+        preferences.usageAlerts = true
+        try await notifier.waitForAuthorizationRequests(2)
+        requests = await notifier.authorizationRequests
+        XCTAssertEqual(requests, 2, "turning alerts on later asks again")
+        monitor.stop()
+    }
+
     func testMessagesCoverExhaustionAndReset() throws {
         let preferences = try makePreferences()
         preferences.language = .english
@@ -223,9 +247,21 @@ private struct CountingProvider: UsageProvider {
 
 private actor RecordingNotifier: UsageNotifying {
     private(set) var posts: [(id: String, title: String, body: String)] = []
-    func requestAuthorization() async -> Bool { true }
+    private(set) var authorizationRequests = 0
+    func requestAuthorization() async -> Bool {
+        authorizationRequests += 1
+        return true
+    }
     func isDenied() async -> Bool { false }
     func post(id: String, title: String, body: String) async { posts.append((id, title, body)) }
+
+    func waitForAuthorizationRequests(_ count: Int) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while authorizationRequests < count, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(authorizationRequests, count)
+    }
 
     func waitForPosts(_ count: Int) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))

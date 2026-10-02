@@ -987,30 +987,35 @@ public actor ManagedProcess: JSONRPCTransport {
             return
 
         case .starting:
-            guard let launchTask = startTask else {
-                await cleanUpFailedLaunch()
-                state = .stopped
-                output.finish()
-                return
-            }
-            switch await launchTask.value {
-            case .failure:
-                startTask = nil
-                await cleanUpFailedLaunch()
-                state = .stopped
-                output.finish()
-                return
-            case .success(let processIdentifier):
-                guard processIdentifier > 0 else {
+            if let launchTask = startTask {
+                switch await launchTask.value {
+                case .failure:
                     startTask = nil
                     await cleanUpFailedLaunch()
                     state = .stopped
                     output.finish()
                     return
+                case .success(let processIdentifier):
+                    guard processIdentifier > 0 else {
+                        startTask = nil
+                        await cleanUpFailedLaunch()
+                        state = .stopped
+                        output.finish()
+                        return
+                    }
+                    launchedProcessIdentifier = processIdentifier
+                    startTask = nil
                 }
-                launchedProcessIdentifier = processIdentifier
-                startTask = nil
+            } else if process == nil || launchedProcessIdentifier == nil {
+                // The launch failed before this shutdown ran: nothing to signal.
+                await cleanUpFailedLaunch()
+                state = .stopped
+                output.finish()
+                return
             }
+            // Otherwise the launch completed while this shutdown was queued:
+            // `start()` recorded the child and joined this task, so the child
+            // is terminated and its exit confirmed below like any other.
 
         case .running, .failing, .stopping:
             break
