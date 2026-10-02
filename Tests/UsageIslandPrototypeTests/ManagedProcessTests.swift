@@ -673,6 +673,67 @@ final class ManagedProcessTests: XCTestCase {
         XCTAssertFalse(retained)
     }
 
+    func testShutdownQueuedBehindACompletedLaunchStillTerminatesTheChild() async throws {
+        let child = FakeManagedChildProcess(
+            suspendsAfterLaunch: true
+        )
+        let signaler = ScriptedProcessSignaler(
+            child: child,
+            terminateActions: [.confirmExit(0)],
+            forceActions: []
+        )
+        let shutdownGate = ControlledShutdownStartGate()
+        let sink = ControlledProcessInputSink()
+        let process = ManagedProcess(
+            configuration: .init(
+                executableURL: URL(fileURLWithPath: "/test/fake-child"),
+                arguments: []
+            ),
+            shutdownScheduler: ImmediateTimeoutScheduler(),
+            processSignaler: signaler,
+            processFactory: FakeManagedChildProcessFactory(child: child),
+            inputOperations: makeInputOperations(sink: sink),
+            shutdownStartGate: {
+                await shutdownGate.wait()
+            },
+            terminationGracePeriod: .seconds(30),
+            killGracePeriod: .seconds(30)
+        )
+        let startTask = makeTrackedTask {
+            try await process.start()
+        }
+        try await child.waitUntilPositiveLaunch()
+        let shutdownTask = makeTrackedTask {
+            try await process.shutdown()
+        }
+        await shutdownGate.waitUntilEntered()
+
+        // The launch completes while the shutdown is still queued: `start()`
+        // records the child, drops its launch task and joins the shutdown.
+        await child.releasePostLaunch()
+        var yields = 0
+        while await process.ownedProcessIdentifier() == nil, yields < 10_000 {
+            yields += 1
+            await Task.yield()
+        }
+        let recordedPID = await process.ownedProcessIdentifier()
+        XCTAssertEqual(recordedPID, 4_242)
+        await shutdownGate.release()
+
+        let startResult = try await boundedResult(of: startTask)
+        switch startResult {
+        case .success:
+            XCTFail("Shutdown must invalidate startup")
+        case .failure(let error):
+            XCTAssertEqual(error as? JSONRPCError, .transportClosed)
+        }
+        try await boundedValue(of: shutdownTask)
+        let events = await signaler.recordedEvents()
+        let retained = await process.hasProcessOwnership()
+        XCTAssertEqual(events, [.terminate(4_242)], "the child is signalled, not forgotten")
+        XCTAssertFalse(retained)
+    }
+
     func testInputWriterRejectsSingleOversizedWrite() async throws {
         let sink = ControlledProcessInputSink()
         let writer = makeInputWriter(

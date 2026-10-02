@@ -1,3 +1,27 @@
+# Validation — 2026-10-02 (review fixes: alerts permission, shutdown race, wedged CLI)
+
+- Static review of the whole tree (no Swift toolchain on the review machine).
+  Three real faults fixed:
+  - Closing the welcome page without "Get started" completed onboarding but
+    never asked macOS for notification permission, and alerts start on, so
+    every alert was dropped silently. The monitor now asks once alerts are
+    on and onboarding is complete, whichever comes last.
+  - A `ManagedProcess.shutdown()` queued while the first launch was in
+    flight could see `start()` finish first and take the failed-launch path:
+    no SIGTERM, no confirmed exit, child unobserved. The shutdown now
+    terminates the recorded child like any other.
+  - `ClaudeUsageCommand` only sent SIGTERM on timeout; a CLI that ignored it
+    blocked `waitUntilExit` and with it every later query and poll. SIGKILL
+    follows after a 5 s grace period.
+- New tests: `testAsksForPermissionOnceTheWelcomePageIsDoneEvenWithoutGetStarted`,
+  `testShutdownQueuedBehindACompletedLaunchStillTerminatesTheChild`,
+  `testACLIThatIgnoresSIGTERMIsKilledAfterTheGracePeriod`.
+- CI on macos-26 (PR #3, commit 0dd61ee): build, `swift test` (292 tests,
+  0 failures; the 289 existing plus these 3) and
+  `./Scripts/verify-resilience.sh` all pass. The first run failed only
+  because the new shutdown test did not compile (a missing initializer
+  argument), fixed in that commit.
+
 # Validation — 2026-10-01 (README GIF, English dates, forecast wording)
 
 - Claude's reset times jitter by fractions of a second between readings, so

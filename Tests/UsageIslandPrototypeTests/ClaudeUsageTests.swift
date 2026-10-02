@@ -281,6 +281,23 @@ final class ClaudeCLIProviderTests: XCTestCase {
     }
 }
 
+final class ClaudeCommandTimeoutTests: XCTestCase {
+    func testACLIThatIgnoresSIGTERMIsKilledAfterTheGracePeriod() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // Ignores SIGTERM like a wedged CLI would; `exec` keeps the pipe in
+        // one process so SIGKILL ends the read as well.
+        let script = directory.appendingPathComponent("claude")
+        try Data("#!/bin/sh\ntrap '' TERM\nexec sleep 30\n".utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let command = ClaudeUsageCommand(executableURL: script, timeout: 0.2, killGracePeriod: 0.2)
+
+        let started = ContinuousClock.now
+        await assertThrows(ClaudeUsageCommandError.timedOut) { _ = try await command.queryUsage() }
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(10), "SIGKILL ends the wait, not the 30 s sleep")
+    }
+}
+
 final class ClaudeLegacyBridgeCleanupTests: XCTestCase {
     private let path = "/Applications/Usage Island.app/Contents/MacOS/UsageIslandPrototype"
 
