@@ -8,7 +8,8 @@ private func snapshot(
     _ provider: ProviderID = .claude,
     used: Int,
     resetsAt: Date? = start.addingTimeInterval(3_600),
-    freshness: DataFreshness = .fresh
+    freshness: DataFreshness = .fresh,
+    capturedAt: Date = start
 ) throws -> UsageSnapshot {
     try UsageSnapshot(
         provider: provider,
@@ -17,7 +18,7 @@ private func snapshot(
         weeklySpend: nil,
         freshness: freshness,
         isActivelyUsed: false,
-        capturedAt: start
+        capturedAt: capturedAt
     )
 }
 
@@ -48,14 +49,33 @@ final class UsageAlertPolicyTests: XCTestCase {
         var policy = UsageAlertPolicy()
         _ = policy.alerts(for: [try snapshot(used: 40)])
         let nextPeriod = start.addingTimeInterval(3_600 + 5 * 3_600)
-        XCTAssertEqual(policy.alerts(for: [try snapshot(used: 2, resetsAt: nextPeriod)]).map(\.kind), [],
+        XCTAssertEqual(policy.alerts(for: [try snapshot(used: 2, resetsAt: nextPeriod,
+                                                        capturedAt: start.addingTimeInterval(3_660))]).map(\.kind), [],
                        "a routine reset is not news")
 
-        _ = policy.alerts(for: [try snapshot(used: 97, resetsAt: nextPeriod)])
+        _ = policy.alerts(for: [try snapshot(used: 97, resetsAt: nextPeriod, capturedAt: nextPeriod.addingTimeInterval(-600))])
         let later = nextPeriod.addingTimeInterval(5 * 3_600)
-        let alerts = policy.alerts(for: [try snapshot(used: 0, resetsAt: later)])
+        let alerts = policy.alerts(for: [try snapshot(used: 0, resetsAt: later, capturedAt: nextPeriod.addingTimeInterval(60))])
         XCTAssertEqual(alerts.map(\.kind), [.reset])
         XCTAssertEqual(alerts.first?.window.remainingPercent, 100)
+    }
+
+    func testAResetAheadOfScheduleAlertsEvenIfTheWindowWasNotLow() throws {
+        var policy = UsageAlertPolicy()
+        _ = policy.alerts(for: [try snapshot(used: 40)])            // resets in an hour
+        let nextPeriod = start.addingTimeInterval(5 * 3_600)
+        let alerts = policy.alerts(for: [try snapshot(used: 0, resetsAt: nextPeriod,
+                                                      capturedAt: start.addingTimeInterval(600))])
+        XCTAssertEqual(alerts.map(\.kind), [.earlyReset])
+        XCTAssertEqual(alerts.first?.window.remainingPercent, 100)
+    }
+
+    func testAnEarlyResetThatGivesBackLittleStaysQuiet() throws {
+        var policy = UsageAlertPolicy()
+        _ = policy.alerts(for: [try snapshot(used: 10)])
+        let nextPeriod = start.addingTimeInterval(5 * 3_600)
+        XCTAssertEqual(policy.alerts(for: [try snapshot(used: 0, resetsAt: nextPeriod,
+                                                        capturedAt: start.addingTimeInterval(600))]).map(\.kind), [])
     }
 
     func testResetTimeJitterIsNotANewPeriod() throws {
@@ -102,7 +122,8 @@ final class UsageAlertMonitorTests: XCTestCase {
         let posts = await notifier.posts
         XCTAssertEqual(posts.first?.id, "usage.claude.300|")
         XCTAssertEqual(posts.first?.title, "Claude · Sesión")
-        XCTAssertEqual(posts.first?.body, "Te queda 10 %. Reinicia en 1h 0m.")
+        let clock = CodexEdgeText.clockPhrase(start.addingTimeInterval(3_600), now: start, preferences: preferences)
+        XCTAssertEqual(posts.first?.body, "Te queda 10 %. Reinicia en 1h 0m, \(clock).")
 
         preferences.usageAlerts = false
         monitor.evaluate([try snapshot(used: 100)])
@@ -142,12 +163,37 @@ final class UsageAlertMonitorTests: XCTestCase {
         let exhausted = UsageAlertMonitor.message(
             for: UsageAlert(provider: .codex, window: window, kind: .level(.exhausted)), now: start, preferences: preferences)
         XCTAssertEqual(exhausted.title, "Codex · Week")
-        XCTAssertEqual(exhausted.body, "Limit reached. Resets in 30 min.")
+        let clock = CodexEdgeText.clockPhrase(start.addingTimeInterval(1_800), now: start, preferences: preferences)
+        XCTAssertEqual(exhausted.body, "Limit reached. Resets in 30 min, \(clock).")
 
         let fresh = try UsageWindow(durationMinutes: 300, usedPercent: 0, resetsAt: start.addingTimeInterval(18_000))
         let reset = UsageAlertMonitor.message(
             for: UsageAlert(provider: .claude, window: fresh, kind: .reset), now: start, preferences: preferences)
         XCTAssertEqual(reset.body, "Reset: 100% available again.")
+
+        let early = UsageAlertMonitor.message(
+            for: UsageAlert(provider: .codex, window: fresh, kind: .earlyReset), now: start, preferences: preferences)
+        XCTAssertEqual(early.body, "Reset ahead of schedule: 100% available again.")
+    }
+
+    func testARunOutLimitPointsToTheOtherTool() throws {
+        let preferences = try makePreferences()
+        preferences.language = .spanish
+        let session = try UsageWindow(durationMinutes: 300, usedPercent: 100, resetsAt: start.addingTimeInterval(1_800))
+        let alert = UsageAlert(provider: .claude, window: session, kind: .level(.exhausted))
+        let codex = try snapshot(.codex, used: 28)
+        let body = UsageAlertMonitor.message(for: alert, now: start, preferences: preferences, others: [codex]).body
+        XCTAssertTrue(body.hasSuffix(" A Codex le queda 72 % de su límite de 5 horas."), body)
+
+        // Not from a stale reading, not when the other tool is used up too,
+        // and not for a per-model limit, which leaves other models usable.
+        for other in [try snapshot(.codex, used: 28, freshness: .stale), try snapshot(.codex, used: 100)] {
+            XCTAssertFalse(UsageAlertMonitor.message(for: alert, now: start, preferences: preferences, others: [other])
+                .body.contains("Codex"))
+        }
+        let fable = try UsageWindow(durationMinutes: 10_080, usedPercent: 100, resetsAt: start.addingTimeInterval(86_400), scope: "Fable")
+        XCTAssertFalse(UsageAlertMonitor.message(for: UsageAlert(provider: .claude, window: fable, kind: .level(.exhausted)),
+                                                 now: start, preferences: preferences, others: [codex]).body.contains("Codex"))
     }
 
     private func makePreferences() throws -> AppPreferences {

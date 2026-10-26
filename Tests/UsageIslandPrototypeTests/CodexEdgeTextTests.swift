@@ -96,14 +96,42 @@ final class CodexEdgeTextTests: XCTestCase {
             CodexEdgeText.resetLabel(now.addingTimeInterval(-60), now: now, preferences: preferences),
             "Reset pending"
         )
+        let soon = now.addingTimeInterval(59 * 60)
         XCTAssertEqual(
-            CodexEdgeText.resetLabel(now.addingTimeInterval(59 * 60), now: now, preferences: preferences),
-            "Resets in 59 min"
+            CodexEdgeText.resetLabel(soon, now: now, preferences: preferences),
+            "Resets in 59 min, " + CodexEdgeText.clockPhrase(soon, now: now, preferences: preferences)
         )
+        let later = now.addingTimeInterval(61 * 60)
         XCTAssertEqual(
-            CodexEdgeText.resetLabel(now.addingTimeInterval(61 * 60), now: now, preferences: preferences),
-            "Resets in 1h 1m"
+            CodexEdgeText.resetLabel(later, now: now, preferences: preferences),
+            "Resets in 1h 1m, " + CodexEdgeText.clockPhrase(later, now: now, preferences: preferences)
         )
+    }
+
+    func testGaugesShowTimeLeftAndClockTimeUnderADay() throws {
+        let preferences = try makePreferences(.spanish)
+        func time(_ date: Date) -> String { date.formatted(.dateTime.hour().minute().locale(preferences.locale)) }
+        let inMinutes = now.addingTimeInterval(45 * 60)
+        XCTAssertEqual(CodexEdgeText.compactResetLabel(inMinutes, now: now, preferences: preferences), "45 min · \(time(inMinutes))")
+        let inHours = now.addingTimeInterval(108 * 60)
+        XCTAssertEqual(CodexEdgeText.compactResetLabel(inHours, now: now, preferences: preferences), "1h 48m · \(time(inHours))")
+        let lastDay = now.addingTimeInterval(14 * 3_600)
+        XCTAssertEqual(CodexEdgeText.compactResetLabel(lastDay, now: now, preferences: preferences), "14h · \(time(lastDay))")
+        XCTAssertFalse(CodexEdgeText.compactResetLabel(now.addingTimeInterval(2 * 86_400), now: now, preferences: preferences)
+            .contains("·"), "beyond a day the date already says when")
+    }
+
+    func testClockPhraseNamesTomorrowAndOneOClock() throws {
+        let spanish = try makePreferences(.spanish)
+        let english = try makePreferences(.english)
+        let calendar = Calendar.current
+        let night = try XCTUnwrap(calendar.date(bySettingHour: 22, minute: 0, second: 0, of: now))
+        let afterMidnight = try XCTUnwrap(calendar.date(byAdding: .minute, value: 185, to: night))   // 1:05
+        XCTAssertTrue(CodexEdgeText.clockPhrase(afterMidnight, now: night, preferences: spanish).hasPrefix("mañana a la 1"))
+        XCTAssertTrue(CodexEdgeText.clockPhrase(afterMidnight, now: night, preferences: english).hasPrefix("tomorrow at "))
+        let morning = try XCTUnwrap(calendar.date(bySettingHour: 9, minute: 0, second: 0, of: now))
+        let afternoon = try XCTUnwrap(calendar.date(bySettingHour: 16, minute: 40, second: 0, of: now))
+        XCTAssertTrue(CodexEdgeText.clockPhrase(afternoon, now: morning, preferences: spanish).hasPrefix("a las "))
     }
 
     func testWeeklyResetIncludesDayOfMonth() throws {

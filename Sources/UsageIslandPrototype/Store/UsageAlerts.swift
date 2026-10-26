@@ -29,6 +29,9 @@ struct UsageAlert: Equatable, Sendable {
         case level(UsageAlertLevel)
         /// A window that had run low started a new period.
         case reset
+        /// A window started a new period well before its scheduled reset,
+        /// whatever its level.
+        case earlyReset
     }
 
     let provider: ProviderID
@@ -61,7 +64,9 @@ struct UsageAlertPolicy {
                 guard let previous else { continue }
 
                 if Self.startedNewPeriod(previous: previous, window: window) {
-                    if previous.level >= .low, level < .low {
+                    if Self.resetEarly(previous: previous, window: window, observedAt: snapshot.capturedAt) {
+                        alerts.append(UsageAlert(provider: snapshot.id, window: window, kind: .earlyReset))
+                    } else if previous.level >= .low, level < .low {
                         alerts.append(UsageAlert(provider: snapshot.id, window: window, kind: .reset))
                     }
                 } else if level > previous.level, level >= .low {
@@ -80,6 +85,20 @@ struct UsageAlertPolicy {
             return after.timeIntervalSince(before) > 60
         }
         return previous.usedPercent - window.usedPercent >= 50
+    }
+
+    /// How far ahead of the scheduled reset, and how much quota it must give
+    /// back, for a new period to count as an early reset.
+    static let earlyResetLead: TimeInterval = 600
+    static let earlyResetMinimumGain = 15
+
+    /// Providers sometimes reset limits ahead of schedule (Codex announced
+    /// dozens of resets in 2026). In fresh readings that is a new period that
+    /// began clearly before the old reset time and gave back a real share.
+    private static func resetEarly(previous: Seen, window: UsageWindow, observedAt: Date) -> Bool {
+        guard let scheduled = previous.resetsAt else { return false }
+        return observedAt < scheduled.addingTimeInterval(-earlyResetLead)
+            && previous.usedPercent - window.usedPercent >= earlyResetMinimumGain
     }
 }
 
@@ -135,23 +154,54 @@ final class UsageAlertMonitor {
         let alerts = policy.alerts(for: snapshots)
         guard preferences.usageAlerts else { return }
         for alert in alerts {
-            let message = Self.message(for: alert, now: clock.now(), preferences: preferences)
+            let others = snapshots.filter { $0.provider != alert.provider }
+            let message = Self.message(for: alert, now: clock.now(), preferences: preferences, others: others)
             let notifier = notifier
             Task { await notifier.post(id: alert.identifier, title: message.title, body: message.body) }
         }
     }
 
-    static func message(for alert: UsageAlert, now: Date, preferences: AppPreferences) -> (title: String, body: String) {
+    /// `others` are the other providers' readings: when a limit that stops
+    /// all work runs out, the body says how much the other tool has left.
+    static func message(for alert: UsageAlert, now: Date, preferences: AppPreferences,
+                        others: [UsageSnapshot] = []) -> (title: String, body: String) {
         let title = "\(alert.provider.displayName) · " + CodexEdgeText.windowTitle(alert.window, preferences: preferences)
         let remaining = alert.window.remainingPercent
         let reset = CodexEdgeText.resetLabel(alert.window.resetsAt, now: now, preferences: preferences)
         switch alert.kind {
         case .level(.exhausted):
-            return (title, preferences.text("Limit reached. \(reset).", "Límite alcanzado. \(reset)."))
+            let body = preferences.text("Limit reached. \(reset).", "Límite alcanzado. \(reset).")
+            guard alert.window.scope == nil,
+                  let other = others.lazy.compactMap({ alternative($0, now: now, preferences: preferences) }).first
+            else { return (title, body) }
+            return (title, body + " " + other)
         case .level:
             return (title, preferences.text("\(remaining)% left. \(reset).", "Te queda \(remaining) %. \(reset)."))
         case .reset:
             return (title, preferences.text("Reset: \(remaining)% available again.", "Se reinició: vuelves a tener \(remaining) % disponible."))
+        case .earlyReset:
+            return (title, preferences.text("Reset ahead of schedule: \(remaining)% available again.",
+                                            "Se reinició antes de tiempo: vuelves a tener \(remaining) % disponible."))
+        }
+    }
+
+    /// "Claude has 72% of its 5-hour limit left.", from a fresh reading
+    /// whose own limit is not used up.
+    static func alternative(_ snapshot: UsageSnapshot, now: Date, preferences: AppPreferences) -> String? {
+        let window = snapshot.pillWindow(at: now)
+        guard snapshot.freshness == .fresh, !window.hasReset(at: now), window.remainingPercent > 0 else { return nil }
+        let name = snapshot.provider.displayName
+        let left = window.remainingPercent
+        switch window.durationMinutes {
+        case 300:
+            return preferences.text("\(name) has \(left)% of its 5-hour limit left.",
+                                    "A \(name) le queda \(left) % de su límite de 5 horas.")
+        case 10_080:
+            return preferences.text("\(name) has \(left)% of its weekly limit left.",
+                                    "A \(name) le queda \(left) % de su límite semanal.")
+        default:
+            return preferences.text("\(name) has \(left)% of its limit left.",
+                                    "A \(name) le queda \(left) % de su límite.")
         }
     }
 }

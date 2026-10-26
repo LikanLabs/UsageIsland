@@ -189,13 +189,31 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
         weeklyWindow?.remainingPercent
     }
 
+    /// Remaining weekly quota at or below which the weekly limit takes over
+    /// the pill from the 5-hour session.
+    public static let weeklyTakeoverPercent = 10
+
+    /// The one limit the pill shows: the 5-hour session when the plan has
+    /// one, otherwise the weekly limit. Once the weekly limit is nearly used
+    /// up and has less left than the session, it is what stops work, so the
+    /// pill shows it instead. The two percentages measure budgets of very
+    /// different sizes, so the weekly limit never takes over just for being
+    /// lower. Per-model limits block one model only and stay in the panel.
+    public func pillWindow(at now: Date) -> UsageWindow {
+        guard preferredWindow.durationMinutes == 300, preferredWindow.scope == nil,
+              let weekly = weeklyWindow, !weekly.hasReset(at: now),
+              weekly.remainingPercent <= Self.weeklyTakeoverPercent,
+              weekly.remainingPercent < preferredWindow.remainingPercent else { return preferredWindow }
+        return weekly
+    }
+
     public var isCurrentlyActive: Bool {
         get { isActivelyUsed }
         set { isActivelyUsed = newValue }
     }
 
     public var priorityScore: Int {
-        let remaining = preferredWindow.remainingPercent
+        let remaining = pillWindow(at: capturedAt).remainingPercent
         let thresholdScore: Int
         if remaining <= 10 {
             thresholdScore = 1_000

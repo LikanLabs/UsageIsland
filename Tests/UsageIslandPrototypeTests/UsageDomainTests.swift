@@ -143,6 +143,47 @@ final class UsageDomainTests: XCTestCase {
         XCTAssertEqual(snapshot.priorityScore, 1_090)
     }
 
+    func testPillShowsTheSessionUnlessTheWeekIsNearlyUsedUp() throws {
+        let later = resetDate.addingTimeInterval(86_400)
+        // Less left in the week alone does not take over: the budgets differ in size.
+        var snapshot = try makeSnapshot(preferred: window(duration: 300, used: 60, reset: later),
+                                        additional: [window(duration: 10_080, used: 70, reset: later)])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 300)
+
+        // The week used up with a fresh session: the week is what stops work.
+        snapshot = try makeSnapshot(preferred: window(duration: 300, used: 0, reset: later),
+                                    additional: [window(duration: 10_080, used: 100, reset: later)])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 10_080)
+
+        // 10 % left takes over too, unless the session has even less left.
+        snapshot = try makeSnapshot(preferred: window(duration: 300, used: 20, reset: later),
+                                    additional: [window(duration: 10_080, used: 90, reset: later)])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 10_080)
+        snapshot = try makeSnapshot(preferred: window(duration: 300, used: 95, reset: later),
+                                    additional: [window(duration: 10_080, used: 90, reset: later)])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 300)
+        snapshot = try makeSnapshot(preferred: window(duration: 300, used: 0, reset: later),
+                                    additional: [window(duration: 10_080, used: 89, reset: later)])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 300, "11 % left is not nearly used up")
+    }
+
+    func testPerModelAndPastLimitsNeverTakeOverThePill() throws {
+        let later = resetDate.addingTimeInterval(86_400)
+        let fable = try UsageWindow(durationMinutes: 10_080, usedPercent: 100, resetsAt: later, scope: "Fable")
+        var snapshot = try makeSnapshot(preferred: window(duration: 300, used: 10, reset: later), additional: [fable])
+        XCTAssertNil(snapshot.pillWindow(at: resetDate).scope)
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 300)
+
+        // A weekly reading whose reset time has passed describes last week.
+        snapshot = try makeSnapshot(preferred: window(duration: 300, used: 10, reset: later),
+                                    additional: [window(duration: 10_080, used: 100, reset: resetDate.addingTimeInterval(-60))])
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 300)
+
+        // Plans without a 5-hour limit keep the weekly one.
+        snapshot = try makeSnapshot(preferred: window(duration: 10_080, used: 30, reset: later))
+        XCTAssertEqual(snapshot.pillWindow(at: resetDate).durationMinutes, 10_080)
+    }
+
     func testCompatibilityIdentityInitializerPreservesCaptureDate() throws {
         let preferred = try window(duration: 300, used: 50)
         let snapshot = try UsageSnapshot(

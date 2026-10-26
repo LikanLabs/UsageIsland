@@ -162,7 +162,7 @@ struct CodexEdgeView: View {
     /// it resets, not "0%".
     private func resetCountdown(now: Date) -> String? {
         guard let snapshot, let used = headlineUsed, used >= 100,
-              let resetsAt = snapshot.preferredWindow.resetsAt, resetsAt > now else { return nil }
+              let resetsAt = snapshot.pillWindow(at: now).resetsAt, resetsAt > now else { return nil }
         return CodexEdgeText.countdown(until: resetsAt, now: now)
     }
 
@@ -174,8 +174,9 @@ struct CodexEdgeView: View {
     /// describes the previous window, so it is withheld instead of shown.
     private var headlineUsed: Int? {
         guard let snapshot else { return nil }
-        if snapshot.freshness == .stale, snapshot.preferredWindow.hasReset(at: Date()) { return nil }
-        return snapshot.preferredWindow.usedPercent
+        let window = snapshot.pillWindow(at: Date())
+        if snapshot.freshness == .stale, window.hasReset(at: Date()) { return nil }
+        return window.usedPercent
     }
 
 
@@ -209,9 +210,10 @@ struct CodexEdgeView: View {
     }
 
     /// Names the one limit the pill shows: the 5-hour window when the plan
-    /// has one, otherwise the weekly limit.
+    /// has one, otherwise the weekly limit, and the weekly limit when it is
+    /// nearly used up (see `UsageSnapshot.pillWindow(at:)`).
     private var periodLabel: String {
-        guard let window = snapshot?.preferredWindow else { return "" }
+        guard let window = snapshot?.pillWindow(at: Date()) else { return "" }
         return CodexEdgeText.pillPeriod(window.durationMinutes, preferences: preferences)
     }
 }
@@ -645,11 +647,23 @@ enum CodexEdgeText {
         guard let date else { return preferences.text("Reset unavailable", "Reinicio no disponible") }
         let minutes = Int(ceil(date.timeIntervalSince(now) / 60))
         if minutes <= 0 { return preferences.text("Reset pending", "Reinicio pendiente") }
-        if minutes < 60 { return preferences.text("Resets in \(minutes) min", "Reinicia en \(minutes) min") }
-        if minutes < 1_440 { return preferences.text("Resets in \(minutes / 60)h \(minutes % 60)m", "Reinicia en \(minutes / 60)h \(minutes % 60)m") }
+        let clock = ", " + clockPhrase(date, now: now, preferences: preferences)
+        if minutes < 60 { return preferences.text("Resets in \(minutes) min", "Reinicia en \(minutes) min") + clock }
+        if minutes < 1_440 { return preferences.text("Resets in \(minutes / 60)h \(minutes % 60)m", "Reinicia en \(minutes / 60)h \(minutes % 60)m") + clock }
         // Include the day of the month: a bare weekday a week away reads like
         // a time earlier today.
         return preferences.text("Resets ", "Reinicia ") + date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
+    }
+
+    /// When a reset under a day away happens: "a las 16:40", "a la 1:05",
+    /// "mañana a las 9:00" / "at 4:40 PM", "tomorrow at 9:00 AM".
+    static func clockPhrase(_ date: Date, now: Date, preferences: AppPreferences) -> String {
+        let time = date.formatted(.dateTime.hour().minute().locale(preferences.locale))
+        let calendar = Calendar.current
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now).map { calendar.isDate(date, inSameDayAs: $0) } ?? false
+        let article = time.prefix(while: \.isNumber) == "1" ? "a la" : "a las"
+        return preferences.text((tomorrow ? "tomorrow " : "") + "at \(time)",
+                                (tomorrow ? "mañana " : "") + "\(article) \(time)")
     }
 
     /// "Session: runs out by 16:40 at this pace" / "Sesión: a este ritmo se
@@ -695,13 +709,19 @@ enum CodexEdgeText {
         }
     }
 
-    /// Short form for the gauges: "in 2h 4m" or "Thu 1, 1:00".
+    /// Short form for the gauges: under a day, the time left and the clock
+    /// time ("1h 48m · 16:40"), otherwise "Thu 1, 1:00". From ten hours
+    /// left the minutes are dropped so it fits beside two other gauges.
     static func compactResetLabel(_ date: Date?, now: Date, preferences: AppPreferences) -> String {
         guard let date else { return "—" }
         let minutes = Int(ceil(date.timeIntervalSince(now) / 60))
         if minutes <= 0 { return preferences.text("Resetting", "Reiniciando") }
-        if minutes < 60 { return preferences.text("in \(minutes) min", "en \(minutes) min") }
-        if minutes < 1_440 { return preferences.text("in \(minutes / 60)h \(minutes % 60)m", "en \(minutes / 60)h \(minutes % 60)m") }
+        if minutes < 1_440 {
+            let left = minutes < 60 ? "\(minutes) min"
+                : minutes < 600 ? "\(minutes / 60)h \(minutes % 60)m"
+                : "\(minutes / 60)h"
+            return left + " · " + date.formatted(.dateTime.hour().minute().locale(preferences.locale))
+        }
         return date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(preferences.locale))
     }
 

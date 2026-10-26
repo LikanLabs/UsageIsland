@@ -15,8 +15,9 @@ to a system material.
 
 The product supports Codex and Claude Code. The pill shows one limit of the
 provider in use most recently (its 5-hour window when the plan has one,
-otherwise the weekly limit) and names it; the details panel shows every
-provider and every limit.
+otherwise the weekly limit, and the weekly limit instead once it has 10 % or
+less left and less than the session) and names it; the details panel shows
+every provider and every limit.
 
 ## Non-negotiable visual baseline
 
@@ -152,7 +153,10 @@ synthetic demo providers are outside the product scope.
 - New installs show the available percentage by default.
 - Notifications are local only (`UNUserNotificationCenter`), alert only on a
   change observed from fresh official readings (never on the first reading
-  or stale data), and respect the "Alert when running low" preference.
+  or stale data), and respect the "Alert when running low" preference. A
+  reset observed well before its scheduled time alerts whatever the level;
+  a used-up limit that stops all work names how much the other tool has
+  left, from its fresh reading only.
 - Opening at login uses `SMAppService.mainApp` and is off until the user turns
   it on.
 - Relaunch after an update only when the bundle on disk reports a different,

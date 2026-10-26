@@ -26,6 +26,15 @@ with reset times.
 
 No account, no server and no telemetry. Usage Island reuses the Codex and
 Claude Code CLIs you already have signed in and never reads their credentials.
+In practice:
+
+- **No Keychain prompts.** It never asks for your password, because it never
+  touches the tokens the CLIs store.
+- **No tokens spent.** Reading your limits sends no prompt to any model.
+- **No throttling.** It asks Claude Code at most every five minutes and waits
+  longer after a failure, so the usage service does not lock it out.
+- **Only official numbers.** The percentages are the ones the CLIs report.
+  When a reading is old, the app says so instead of estimating.
 
 ## Contents
 
@@ -99,8 +108,13 @@ orange above 10 %, red below.
 as Claude Code reports new usage, and Codex when its usage rises. When nothing
 has changed since launch, it shows the tool with the least quota left. The
 pill shows one limit and names it: **5 hours** when the plan has that window,
-otherwise **weekly**. When that limit is used up, it shows the time left until
-it resets instead of "0%".
+otherwise **weekly**. When the weekly limit is nearly used up (10 % or less
+left, and less than the session), the pill shows it instead, because it is
+what stops you. When the shown limit is used up, the pill shows the time left
+until it resets instead of "0%".
+
+**Reset times.** Under a day away, each ring shows the time left and the clock
+time, such as "1h 48m · 16:40"; further away, the day and time.
 
 **Will it last?** While you are using a tool, its card adds a one-line
 estimate from your last half hour: "Session: runs out by 16:40 at this pace",
@@ -108,8 +122,10 @@ or "At this pace it lasts until the reset". It is only an estimate from the
 official percentages; it disappears when you stop.
 
 **Alerts.** With **Alert when running low** on (the default), you get a macOS
-notification when a limit drops to 20 %, 10 % and 0 % left, and when a limit
-that had run low resets. Alerts are local; nothing is sent anywhere.
+notification when a limit drops to 20 %, 10 % and 0 % left, when a limit that
+had run low resets, and when a limit resets well ahead of schedule. When a
+limit that stops all work runs out, the alert also says how much the other
+tool has left. Alerts are local; nothing is sent anywhere.
 
 **Open at login.** Turn it on in settings so Usage Island starts after a
 restart.

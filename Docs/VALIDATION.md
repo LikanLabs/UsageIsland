@@ -1,3 +1,20 @@
+# Validation — 2026-10-26 (quick wins from the usage research)
+
+- The pill shows the weekly limit instead of the 5-hour session once the
+  week has 10 % or less left and less than the session, so a used-up week no
+  longer hides behind a full session. Lower weekly percentages alone do not
+  take over: the two percentages measure budgets of different sizes.
+- A reset observed in fresh readings at least ten minutes before its
+  scheduled time, giving back at least 15 points, alerts as "Reset ahead of
+  schedule", whatever the level.
+- When a limit that stops all work runs out, the alert adds how much the
+  other tool has left, from its fresh reading only.
+- Reset labels under a day away show the time left and the clock time
+  ("1h 48m · 16:40"; "14h · 23:59" from ten hours), measured to fit a row of
+  three gauges; the long label adds ", a las 16:40" (or "mañana a la 1:05").
+- The README lists concrete consequences of reading only from the CLIs.
+- `swift test`: 302 tests pass.
+
 # Validation — 2026-10-26 (first signed and notarized release, 0.1.16)
 
 - v0.1.15 never shipped. Its first run stopped waiting after 30 minutes
