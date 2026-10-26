@@ -47,9 +47,14 @@ signed in.
 
 ```sh
 brew tap LikanLabs/tap
+brew trust --cask likanlabs/tap/usage-island
 brew install --cask usage-island
 open -a "Usage Island"
 ```
+
+Recent Homebrew versions install casks from third-party taps only once you
+trust them; `brew trust` does that for this cask alone. If your Homebrew
+says `trust` is an unknown command, skip that line.
 
 The app runs in the background; you can close Terminal. You can also open it
 from **Applications** in Finder. The first time, the panel opens on a short
@@ -153,6 +158,7 @@ brew uninstall --zap --cask usage-island
 | "Couldn't read usage" | Usually temporary; click refresh |
 | An old value with a dashed ring | The last refresh failed; click refresh or check your connection |
 | The app does not open | See [First launch](#first-launch) |
+| "Refusing to load cask … from untrusted tap" | Run `brew trust --cask likanlabs/tap/usage-island`, then install again |
 
 ## Development
 
