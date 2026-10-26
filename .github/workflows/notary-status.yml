@@ -1,0 +1,35 @@
+name: Notarization status
+
+# Run by hand to see Apple's recent notarization submissions, and the details
+# and log of one of them. The App Store Connect key stays in the secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      submission:
+        description: Submission ID to show in detail (optional)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: macos-26
+    env:
+      NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+      NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+      NOTARY_API_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+      SUBMISSION: ${{ inputs.submission }}
+    steps:
+      - name: Show submissions
+        run: |
+          key_path="$RUNNER_TEMP/notary-key.p8"
+          printf '%s' "$NOTARY_API_KEY_P8" > "$key_path"
+          credentials=(--key "$key_path" --key-id "$NOTARY_API_KEY_ID" --issuer "$NOTARY_API_ISSUER")
+          xcrun notarytool history "${credentials[@]}"
+          if [[ -n "$SUBMISSION" ]]; then
+            xcrun notarytool info "$SUBMISSION" "${credentials[@]}"
+            xcrun notarytool log "$SUBMISSION" "${credentials[@]}" || true
+          fi
+          rm -f "$key_path"

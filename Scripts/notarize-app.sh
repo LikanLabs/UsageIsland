@@ -23,11 +23,6 @@ fi
 submission_zip="$PWD/dist/Usage-Island-submission.zip"
 result_path="$PWD/dist/notarization-result.json"
 ditto -c -k --keepParent "$app_path" "$submission_zip"
-# A new team's first submissions can take hours; later ones usually minutes.
-wait_limit="${USAGE_ISLAND_NOTARY_TIMEOUT:-3h}"
-submit_status=0
-xcrun notarytool submit "$submission_zip" "${credentials[@]}" --wait --timeout "$wait_limit" \
-    --output-format json > "$result_path" || submit_status=$?
 result_field() {
     python3 -c 'import json, sys
 try:
@@ -35,14 +30,33 @@ try:
 except Exception:
     print("-")' "$result_path" "$1"
 }
+# A new team's first submissions can take hours; later ones usually minutes.
+# Waiting is retried, so a dropped connection does not lose the submission.
+wait_limit_seconds="${USAGE_ISLAND_NOTARY_TIMEOUT_SECONDS:-18000}"
+xcrun notarytool submit "$submission_zip" "${credentials[@]}" --output-format json > "$result_path" || true
 submission_id="$(result_field id)"
-submission_status="$(result_field status)"
-if [[ "$submit_status" != 0 || "$submission_status" != "Accepted" ]]; then
+if [[ "$submission_id" == "-" ]]; then
+    cat "$result_path" >&2 || true
+    printf 'The upload to the notary service failed.\n' >&2
+    exit 1
+fi
+printf 'Submitted for notarization: %s\n' "$submission_id"
+deadline=$(( $(date +%s) + wait_limit_seconds ))
+submission_status="-"
+while :; do
+    xcrun notarytool wait "$submission_id" "${credentials[@]}" --timeout 15m --output-format json > "$result_path" || true
+    submission_status="$(result_field status)"
+    case "$submission_status" in
+        Accepted|Invalid|Rejected) break ;;
+    esac
+    if (( $(date +%s) >= deadline )); then break; fi
+    printf 'Still waiting for Apple (status: %s)\n' "$submission_status"
+    sleep 30
+done
+if [[ "$submission_status" != "Accepted" ]]; then
     cat "$result_path" >&2 || true
     # Apple's reasons, once it has finished processing the submission.
-    if [[ "$submission_id" != "-" ]]; then
-        xcrun notarytool log "$submission_id" "${credentials[@]}" >&2 || true
-    fi
+    xcrun notarytool log "$submission_id" "${credentials[@]}" >&2 || true
     printf 'Notarization of submission %s was not accepted (status: %s).\n' "$submission_id" "$submission_status" >&2
     exit 1
 fi
