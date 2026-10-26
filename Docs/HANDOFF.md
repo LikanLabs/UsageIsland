@@ -18,8 +18,9 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 - El 26 de septiembre pidió agregar Claude: la pill muestra el proveedor usado
   más recientemente y el panel muestra ambos. Claude se conecta desde Ajustes con
   un puente de barra de estado (sin leer credenciales).
-- Firma Developer ID y notarización: opcionales vía secretos de GitHub (ver
-  README). Sin secretos, el release se firma ad hoc como hasta ahora.
+- Firma Developer ID (a nombre de IGNITE SPA) y notarización activas desde la
+  0.1.16 (secretos cargados el 2026-10-26; ver README). Sin secretos, un fork
+  firma ad hoc.
 
 ## Estado implementado
 
@@ -76,8 +77,7 @@ Scripts y pruebas: `Scripts/package-app.sh`, `Scripts/notarize-app.sh`,
 
 1. Pruebas físicas: suspensión real, conectar/desconectar pantallas, clamshell,
    pantalla completa y recorridos continuos del cursor con auto-hide.
-2. Configurar los secretos de firma/notarización si se quiere evitar el aviso de
-   Gatekeeper; verificar el primer release notarizado.
-3. Actualizar el cask en `LikanLabs/homebrew-tap` con versión y SHA-256 de cada release.
+2. La primera notarización de la cuenta tardó cerca de 1 h 30 min; si una
+   vuelve a tardar, el flujo manual "Notarization status" muestra en qué va.
 
 No publicar ni hacer commits sin autorización explícita del usuario.

@@ -1,3 +1,20 @@
+# Validation — 2026-10-26 (first signed and notarized release, 0.1.16)
+
+- v0.1.15 never shipped. Its first run stopped waiting after 30 minutes
+  while Apple processed the new team's first submission, which Apple
+  accepted about 1 h 30 min after upload; its second run lost the runner's
+  connection while waiting. The tag remains, without a release.
+- `notarize-app.sh` now submits, then waits in 15-minute rounds for up to
+  five hours, retrying after errors, and prints Apple's log on rejection. The
+  manual "Notarization status" workflow lists recent submissions.
+- 0.1.16: every release step passed. The downloaded ZIP matches its SHA-256
+  and the tap's cask. The app is signed "Developer ID Application: IGNITE
+  SPA (D3RW6RQF98)" with the hardened runtime and a secure timestamp, the
+  notarization ticket is stapled, and `spctl` reports "accepted,
+  source=Notarized Developer ID". Apple's log for the first accepted
+  submission lists no issues.
+- The README and the cask no longer explain how to open a blocked app.
+
 # Validation — 2026-10-25 (Claude Code signed out)
 
 - Claude monitoring stopped: Claude Code 2.1.292 was signed out

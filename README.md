@@ -58,18 +58,13 @@ open at login and alerts.
 
 ### First launch
 
-Releases are not yet notarized by Apple, so macOS may block the first launch.
-If the warning only offers **Move to Trash** and **Done**:
+Releases are signed with a Developer ID and notarized by Apple, so macOS
+opens Usage Island like any app downloaded from the internet: the first
+time it asks you to confirm, and you click **Open**. The signature carries
+the name of IGNITE SPA, the company behind LikanLabs.
 
-1. Click **Done**. Do not move the app to the Trash.
-2. Open **System Settings → Privacy & Security**.
-3. Under **Security**, click **Open Anyway** next to Usage Island.
-4. Confirm with your password, then click **Open**.
-
-**Open Anyway** stays available for about an hour after the blocked launch,
-and you normally need it only once. See
-[Apple's guide](https://support.apple.com/guide/mac-help/open-an-app-by-overriding-security-settings-mh40617/mac).
-Only do this for builds from this repository or its Homebrew tap.
+Versions before 0.1.16 were not notarized. If macOS blocks one of them,
+update with `brew upgrade --cask usage-island`.
 
 ## Update
 
@@ -179,14 +174,19 @@ and the data and privacy rules.
 Pushing a tag such as `v0.1.5` runs the release workflow:
 
 1. Runs `swift test` and the resilience checks.
-2. Builds a universal (Apple Silicon and Intel) app, zips it and publishes the
-   ZIP and its SHA-256 to the GitHub release. Re-running a tag replaces them.
+2. Builds a universal (Apple Silicon and Intel) app, signs it with the
+   Developer ID and has Apple notarize it, waiting up to five hours and
+   through dropped connections, then zips it and publishes the ZIP and its
+   SHA-256 to the GitHub release. Re-running a tag replaces them.
 3. Updates the cask in [LikanLabs/homebrew-tap](https://github.com/LikanLabs/homebrew-tap)
    with the new version and checksum, using
    [`Distribution/homebrew/Casks/usage-island.rb`](Distribution/homebrew/Casks/usage-island.rb)
    as the template.
 
-Optional repository secrets:
+The manual **Notarization status** workflow lists Apple's recent
+notarization submissions and shows the details and log of one.
+
+Repository secrets:
 
 | Secret | Enables |
 | --- | --- |
