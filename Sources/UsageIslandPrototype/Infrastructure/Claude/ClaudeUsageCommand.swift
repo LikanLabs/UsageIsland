@@ -14,10 +14,14 @@ protocol ClaudeUsageQuerying: Sendable {
     /// only reports what Claude Code already holds, which expires after a
     /// while without use; the `/usage` command fetches them again.
     func refreshLimits() async throws
+    /// `claude auth status --json`: whether Claude Code is signed in. It
+    /// reports the sign-in state only, never credentials.
+    func authStatus() async throws -> Data
 }
 
 extension ClaudeUsageQuerying {
     func refreshLimits() async throws {}
+    func authStatus() async throws -> Data { Data() }
 }
 
 /// One short-lived `claude -p` process per query, using the CLI's own
@@ -42,6 +46,8 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
     ]
     /// The local `/usage` command: no model request, no tokens.
     static let refreshArguments = ["-p", "/usage", "--output-format", "json"] + isolation
+    /// Sign-in state only; starts no session.
+    static let authStatusArguments = ["auth", "status", "--json"]
 
     static func environment(from base: [String: String]) -> [String: String] {
         var environment = base
@@ -64,6 +70,10 @@ struct ClaudeUsageCommand: ClaudeUsageQuerying {
 
     func refreshLimits() async throws {
         _ = try await launch(arguments: Self.refreshArguments, input: Data())
+    }
+
+    func authStatus() async throws -> Data {
+        try await launch(arguments: Self.authStatusArguments, input: Data())
     }
 
     private func launch(arguments: [String], input: Data) async throws -> Data {
@@ -143,6 +153,21 @@ private final class TimeoutFlag: @unchecked Sendable {
     private var value = false
     var isSet: Bool { lock.withLock { value } }
     func set() { lock.withLock { value = true } }
+}
+
+/// Reads `claude auth status --json`. A signed-out Claude Code answers
+/// `get_usage` exactly like an account without plan limits; this tells the
+/// two apart.
+enum ClaudeAuthStatusParser {
+    private struct Status: Decodable {
+        let loggedIn: Bool
+    }
+
+    /// True only when Claude Code says nobody is signed in. An unreadable
+    /// answer is not taken as signed out.
+    static func isSignedOut(_ data: Data) -> Bool {
+        (try? JSONDecoder().decode(Status.self, from: data))?.loggedIn == false
+    }
 }
 
 /// Parses the `get_usage` control response. The CLI marks this shape as

@@ -1,3 +1,20 @@
+# Validation — 2026-10-25 (Claude Code signed out)
+
+- Claude monitoring stopped: Claude Code 2.1.292 was signed out
+  (`claude auth status --json`: `loggedIn: false`), and its saved limits were
+  three days old. Signed out, `get_usage` answers `rate_limits_available:
+  false` and `subscription_type: null`, the same as an account without plan
+  limits, so the app said "no plan limits" and backed off for up to an hour.
+- When `get_usage` reports no plan limits, the app now asks
+  `claude auth status --json`. Signed out, it shows "Sign in to Claude Code:
+  run claude auth login" and checks again every five minutes, so the card
+  returns within minutes of signing in. An API-key account still shows "no
+  plan limits" and backs off as before.
+- The Mac was also running the local 0.1.13 build left in `dist/` instead of
+  the installed 0.1.14: that copy never relaunches into updates. It was
+  removed and unregistered from Launch Services.
+- `swift test`: 295 tests pass.
+
 # Validation — 2026-10-02 (review fixes: alerts permission, shutdown race, wedged CLI)
 
 - Static review of the whole tree (no Swift toolchain on the review machine).

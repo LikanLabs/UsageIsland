@@ -8,6 +8,8 @@ enum ClaudeUsageError: Error, Equatable, Sendable {
     case cliNotFound
     /// The CLI answered that this account has no plan limits.
     case noPlanLimits
+    /// Claude Code says nobody is signed in.
+    case signedOut
     /// The CLI ran but gave no usable answer (often: not signed in).
     case queryFailed
     /// Plan limits apply but none were available this time.
@@ -19,7 +21,7 @@ extension ClaudeUsageError: ProviderIssueReporting {
         switch self {
         case .cliNotFound: .notInstalled
         case .noPlanLimits: .noPlanLimits
-        case .queryFailed: .notSignedIn
+        case .queryFailed, .signedOut: .notSignedIn
         case .notConnected, .invalidRecord, .temporarilyUnavailable: .unavailable
         }
     }
@@ -107,6 +109,13 @@ actor ClaudeUsageProvider: UsageProvider {
                     limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
                 }
                 self.store(limits)
+            } catch ClaudeUsageResponseParser.Failure.limitsUnavailable {
+                // A signed-out Claude Code also answers "no plan limits".
+                if let status = try? await query.authStatus(), ClaudeAuthStatusParser.isSignedOut(status) {
+                    self.noteSignedOut()
+                } else {
+                    self.noteQueryFailure(.noPlanLimits)
+                }
             } catch let failure as ClaudeUsageResponseParser.Failure {
                 switch failure {
                 case .limitsUnavailable: self.noteQueryFailure(.noPlanLimits)
@@ -146,6 +155,13 @@ actor ClaudeUsageProvider: UsageProvider {
     private func noteQueryFailure(_ error: ClaudeUsageError) {
         lastQueryError = error
         consecutiveFailures += 1
+    }
+
+    /// No backoff: checking every interval shows the limits within minutes
+    /// of signing in again.
+    private func noteSignedOut() {
+        lastQueryError = .signedOut
+        consecutiveFailures = 0
     }
 
     static func snapshot(

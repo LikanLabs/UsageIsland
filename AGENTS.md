@@ -124,8 +124,12 @@ synthetic demo providers are outside the product scope.
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`: Claude Code then stops fetching
   plan limits once its saved copy expires.
 - The `get_usage` shape is experimental; parse strictly and fall back to the
-  last valid reading. `rate_limits_available: false` means no plan limits;
-  `rate_limits: null` with plan limits available is a temporary failure.
+  last valid reading. `rate_limits_available: false` means no plan limits,
+  unless `claude auth status --json` (sign-in state only, no credentials)
+  reports `loggedIn: false`: then Claude Code is signed out, which the app
+  shows with the sign-in hint and checks again every five minutes without
+  backoff. `rate_limits: null` with plan limits available is a temporary
+  failure.
 - `get_usage` only reports the limits Claude Code already holds, which
   expire after a while without use. On an empty answer, run the local
   `/usage` command once (same isolation, no tokens) and ask again; do that at

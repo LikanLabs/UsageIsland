@@ -534,8 +534,8 @@ struct CodexUsageDetailView: View {
             preferences.text("Codex sign-in expired: run codex login in Terminal",
                              "Sesión de Codex expirada: ejecuta codex login en la Terminal")
         case .claude:
-            preferences.text("Claude sign-in needed: run claude, then /login",
-                             "Falta iniciar sesión en Claude: ejecuta claude y luego /login")
+            preferences.text("Sign in to Claude Code: run claude auth login",
+                             "Inicia sesión en Claude Code: ejecuta claude auth login")
         }
     }
 

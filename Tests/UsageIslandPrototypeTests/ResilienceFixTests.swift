@@ -96,6 +96,57 @@ final class ClaudeTemporaryFailureTests: XCTestCase {
     }
 }
 
+final class ClaudeSignedOutTests: XCTestCase {
+    private let noPlanLimits = answer(rateLimits: "null", available: false)
+    private let signedOut = #"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#
+
+    func testSignedOutAsksToSignInAndChecksAgainWithoutBackoff() async throws {
+        let clock = MovableClock(base)
+        let query = SignInQuery(usage: [noPlanLimits, noPlanLimits, withLimits], status: signedOut)
+        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600, makeQuery: { query })
+        do {
+            _ = try await provider.fetchUsage()
+            XCTFail("expected a sign-in error")
+        } catch {
+            XCTAssertEqual(error as? ClaudeUsageError, .signedOut)
+            XCTAssertEqual((error as? ClaudeUsageError)?.issue, .notSignedIn)
+        }
+        var wait = await provider.currentWait
+        XCTAssertEqual(wait, 300, "no backoff while signed out")
+        clock.advance(300)
+        _ = try? await provider.fetchUsage()
+        wait = await provider.currentWait
+        XCTAssertEqual(wait, 300)
+
+        // Signed in again: the next regular check shows the limits.
+        await query.signIn()
+        clock.advance(300)
+        let snapshot = try await provider.fetchUsage()
+        XCTAssertEqual(snapshot.preferredWindow.usedPercent, 26)
+    }
+
+    func testAnAPIKeyAccountStillHasNoPlanLimits() async throws {
+        let clock = MovableClock(base)
+        let query = SignInQuery(usage: [noPlanLimits], status: #"{"loggedIn":true,"authMethod":"apiKey"}"#)
+        let provider = ClaudeUsageProvider(clock: clock, queryInterval: 300, maximumBackoff: 3_600, makeQuery: { query })
+        do {
+            _ = try await provider.fetchUsage()
+            XCTFail("expected no plan limits")
+        } catch {
+            XCTAssertEqual(error as? ClaudeUsageError, .noPlanLimits)
+        }
+        let wait = await provider.currentWait
+        XCTAssertEqual(wait, 600, "an account without plan limits still backs off")
+    }
+
+    func testOnlyAnExplicitSignedOutAnswerCounts() {
+        XCTAssertTrue(ClaudeAuthStatusParser.isSignedOut(Data(signedOut.utf8)))
+        XCTAssertFalse(ClaudeAuthStatusParser.isSignedOut(Data(#"{"loggedIn":true,"authMethod":"claude.ai"}"#.utf8)))
+        XCTAssertFalse(ClaudeAuthStatusParser.isSignedOut(Data()), "an older CLI without auth status")
+        XCTAssertFalse(ClaudeAuthStatusParser.isSignedOut(Data("error: unknown command 'auth'".utf8)))
+    }
+}
+
 final class CodexExpiredSignInTests: XCTestCase {
     func testRejectedSignInMeansNotSignedIn() async throws {
         let provider = CodexUsageProvider(client: RejectingCodexClient(), clock: MovableClock(base))
@@ -180,6 +231,18 @@ private actor QueuedQuery: ClaudeUsageQuerying {
         return answers.isEmpty ? withoutLimits : answers.removeFirst()
     }
     func refreshLimits() async throws { refreshes += 1 }
+}
+
+private actor SignInQuery: ClaudeUsageQuerying {
+    private var usage: [Data]
+    private var status: Data
+    init(usage: [Data], status: String) {
+        self.usage = usage
+        self.status = Data(status.utf8)
+    }
+    func signIn() { status = Data(#"{"loggedIn":true,"authMethod":"claude.ai"}"#.utf8) }
+    func queryUsage() async throws -> Data { usage.isEmpty ? withLimits : usage.removeFirst() }
+    func authStatus() async throws -> Data { status }
 }
 
 private actor RejectingCodexClient: CodexUsageClient {

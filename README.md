@@ -152,7 +152,8 @@ brew uninstall --zap --cask usage-island
 | You see | Try |
 | --- | --- |
 | "Codex CLI is not installed" / "Claude Code is not installed" | Install the CLI; the app finds it in the usual locations |
-| "Sign in to … in Terminal" | Run `codex` or `claude` in Terminal and sign in with your subscription |
+| "Codex sign-in expired" | Run `codex login` in Terminal |
+| "Sign in to Claude Code" | Run `claude auth login` in Terminal; the card comes back within five minutes |
 | "This account has no plan limits" | You are signed in with an API key or pay-as-you-go billing; plan limits exist only for subscriptions |
 | "Couldn't read usage" | Usually temporary; click refresh |
 | An old value with a dashed ring | The last refresh failed; click refresh or check your connection |
