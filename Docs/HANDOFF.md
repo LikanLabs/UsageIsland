@@ -21,6 +21,10 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 - Firma Developer ID (a nombre de IGNITE SPA) y notarización activas desde la
   0.1.16 (secretos cargados el 2026-10-26; ver README). Sin secretos, un fork
   firma ad hoc.
+- El 27 de octubre pidió que la pill muestre, bajo el porcentaje, cuánto
+  falta para que su límite vuelva al 100 % (por ejemplo «1h 48m») en lugar de
+  «5 horas». El nombre del límite queda solo mientras no hay nada usado o no
+  se conoce el reinicio.
 
 ## Estado implementado
 

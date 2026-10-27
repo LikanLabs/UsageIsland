@@ -27,6 +27,20 @@ final class CodexEdgeTextTests: XCTestCase {
         XCTAssertEqual(CodexEdgeText.pillPeriod(10_080, preferences: preferences), "weekly")
     }
 
+    func testPillCountsDownUntilItsLimitIsFullAgain() {
+        let session = UsageWindow(validatedDurationMinutes: 300, usedPercent: 4, resetsAt: now.addingTimeInterval(108 * 60))
+        XCTAssertEqual(CodexEdgeText.pillCountdown(session, now: now), "1h 48m")
+        let weekly = UsageWindow(validatedDurationMinutes: 10_080, usedPercent: 92, resetsAt: now.addingTimeInterval(76 * 3_600))
+        XCTAssertEqual(CodexEdgeText.pillCountdown(weekly, now: now), "3d 4h")
+        // Nothing to wait for: the pill names the limit instead.
+        let unused = UsageWindow(validatedDurationMinutes: 300, usedPercent: 0, resetsAt: now.addingTimeInterval(300 * 60))
+        XCTAssertNil(CodexEdgeText.pillCountdown(unused, now: now))
+        let unknown = UsageWindow(validatedDurationMinutes: 300, usedPercent: 30, resetsAt: nil)
+        XCTAssertNil(CodexEdgeText.pillCountdown(unknown, now: now))
+        let passed = UsageWindow(validatedDurationMinutes: 300, usedPercent: 30, resetsAt: now.addingTimeInterval(-60))
+        XCTAssertNil(CodexEdgeText.pillCountdown(passed, now: now))
+    }
+
     func testPillPrefersTheFiveHourLimitAndFallsBackToWeekly() throws {
         let weeklyOnly = try CodexUsageMapper.mapRateLimits(
             .object(["rateLimits": .object(["primary": .object(["windowDurationMins": .integer(10_080), "usedPercent": .integer(3), "resetsAt": .null])])]),

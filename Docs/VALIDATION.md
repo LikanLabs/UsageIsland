@@ -1,3 +1,24 @@
+# Validation — 2026-10-27 (pill counts down to a full limit)
+
+- At the user's request, the caption under the pill's percentage shows the
+  time until its limit is back to 100 % ("1h 53m", "3d 4h") instead of the
+  limit's name. The name ("5 hours", "weekly") stays while none of the limit
+  is used or no future reset time is known. A used-up limit still shows the
+  countdown in large type over "until reset". VoiceOver reads the name and
+  the countdown.
+- Previewed in the real app from a temporary build, then unregistered and
+  deleted: "80%" over "1h 53m" at the right edge (75 % size), and "80%
+  1h 52m" at the notch, both inside the pill.
+- `swift test`: 303 tests pass; `./Scripts/verify-resilience.sh` passes.
+
+# Validation — 2026-10-27 (release 0.1.17)
+
+- Every release step passed. The ZIP's SHA-256 matches the tap's cask, the
+  notarization ticket is stapled, and `spctl` reports the installed app
+  "accepted, source=Notarized Developer ID", signed by IGNITE SPA.
+- `brew upgrade --cask usage-island` installed it, and the running app
+  relaunched itself into 0.1.17.
+
 # Validation — 2026-10-26 (quick wins from the usage research)
 
 - The pill shows the weekly limit instead of the 5-hour session once the

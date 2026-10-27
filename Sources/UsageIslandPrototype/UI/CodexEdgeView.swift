@@ -133,13 +133,13 @@ struct CodexEdgeView: View {
     }
 
     private var pillContent: some View {
-        // Ticks so a countdown to the reset stays current.
+        // Ticks so the countdowns to the reset stay current.
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let countdown = resetCountdown(now: context.date)
             let value = Text(countdown ?? headlineText).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.7)
-            let caption = Text(countdown == nil ? periodLabel : preferences.text("until reset", "para reinicio"))
-                .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            let caption = Text(countdown == nil ? limitCaption(now: context.date) : preferences.text("until reset", "para reinicio"))
+                .font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.8)
             if atNotch {
                 HStack(spacing: 7) {
@@ -161,9 +161,19 @@ struct CodexEdgeView: View {
     /// When the shown limit is used up, the useful number is how long until
     /// it resets, not "0%".
     private func resetCountdown(now: Date) -> String? {
-        guard let snapshot, let used = headlineUsed, used >= 100,
-              let resetsAt = snapshot.pillWindow(at: now).resetsAt, resetsAt > now else { return nil }
-        return CodexEdgeText.countdown(until: resetsAt, now: now)
+        guard let used = headlineUsed, used >= 100 else { return nil }
+        return timeToFull(now: now)
+    }
+
+    /// How long until the shown limit is back to 100 %.
+    private func timeToFull(now: Date) -> String? {
+        snapshot.flatMap { CodexEdgeText.pillCountdown($0.pillWindow(at: now), now: now) }
+    }
+
+    /// Under the percentage: the time until the limit is full again, or its
+    /// name while nothing is used or no reset time is known.
+    private func limitCaption(now: Date) -> String {
+        timeToFull(now: now) ?? periodLabel
     }
 
     private var headlineText: String {
@@ -200,7 +210,8 @@ struct CodexEdgeView: View {
             return prefix + preferences.text("limit reached, resets in \(countdown)", "límite alcanzado, reinicia en \(countdown)")
         }
         let amount = "\(displayPercent(used))% " + percentLabel
-        return prefix + amount + ", " + periodLabel
+        let reset = timeToFull(now: Date()).map { preferences.text(", resets in \($0)", ", reinicia en \($0)") } ?? ""
+        return prefix + amount + ", " + periodLabel + reset
     }
 
     private func displayPercent(_ used: Int) -> Int { preferences.showsConsumedPercent ? used : 100 - used }
@@ -692,6 +703,14 @@ enum CodexEdgeText {
         if minutes < 60 { return "\(minutes) min" }
         if minutes < 1_440 { return "\(minutes / 60)h \(minutes % 60)m" }
         return "\(minutes / 1_440)d \(minutes % 1_440 / 60)h"
+    }
+
+    /// Time until the pill's limit is back to 100 % ("1h 48m", "2d 4h").
+    /// Nil while nothing is used or without a future reset time, so the pill
+    /// names the limit instead.
+    static func pillCountdown(_ window: UsageWindow, now: Date) -> String? {
+        guard window.usedPercent > 0, let resetsAt = window.resetsAt, resetsAt > now else { return nil }
+        return countdown(until: resetsAt, now: now)
     }
 
     static func pillPeriod(_ durationMinutes: Int, preferences: AppPreferences) -> String {

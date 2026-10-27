@@ -107,11 +107,13 @@ orange above 10 %, red below.
 **Which tool the pill shows.** The one you used most recently: Claude as soon
 as Claude Code reports new usage, and Codex when its usage rises. When nothing
 has changed since launch, it shows the tool with the least quota left. The
-pill shows one limit and names it: **5 hours** when the plan has that window,
-otherwise **weekly**. When the weekly limit is nearly used up (10 % or less
-left, and less than the session), the pill shows it instead, because it is
-what stops you. When the shown limit is used up, the pill shows the time left
-until it resets instead of "0%".
+pill shows one limit: the 5-hour window when the plan has one, otherwise the
+weekly limit. When the weekly limit is nearly used up (10 % or less left, and
+less than the session), the pill shows it instead, because it is what stops
+you. Under the percentage, the pill shows how long until that limit is back
+to 100 %, such as "1h 48m", or its name (**5 hours**, **weekly**) while none
+of it is used. When the shown limit is used up, the time left until it resets
+takes the place of "0%".
 
 **Reset times.** Under a day away, each ring shows the time left and the clock
 time, such as "1h 48m · 16:40"; further away, the day and time.

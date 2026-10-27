@@ -11,13 +11,15 @@ replaced the v26 prototype): a glass pill attached to a screen edge, or a
 black pill at the base of the notch, with the active provider's mark inside a
 usage ring, and a glass details panel with one card of ring gauges per
 provider plus an in-panel settings page. On macOS 14–25 the glass falls back
-to a system material.
+to a system material. On 2026-10-27 the user replaced the limit's name under
+the pill's percentage with the time until that limit is full again.
 
 The product supports Codex and Claude Code. The pill shows one limit of the
 provider in use most recently (its 5-hour window when the plan has one,
 otherwise the weekly limit, and the weekly limit instead once it has 10 % or
-less left and less than the session) and names it; the details panel shows
-every provider and every limit.
+less left and less than the session) and, under its percentage, the time
+until that limit is back to 100 % (its name while none of it is used or no
+reset time is known); the details panel shows every provider and every limit.
 
 ## Non-negotiable visual baseline
 
@@ -27,7 +29,9 @@ Liquid Glass UI.
 Preserve:
 
 - the pill attached to the screen edge (glass) or the base of the notch
-  (black), and its single labelled limit ("5 hours" or "weekly");
+  (black), and its single limit, captioned with the time until it is full
+  again ("1h 48m"), or with its name ("5 hours" or "weekly") while none of it
+  is used;
 - left, right and top (notch) positions and the auto-hide behavior;
 - the usage rings, their remaining-quota colors, the dashed stale state and
   the reset countdown when a limit is used up;
