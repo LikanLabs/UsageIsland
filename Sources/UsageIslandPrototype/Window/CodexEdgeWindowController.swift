@@ -9,8 +9,8 @@ final class CodexEdgeWindowController {
     private let system: SystemIntegration
     private let displayScale = EdgeDisplayScale()
     private let navigation = EdgePanelNavigation()
-    private var tab: NSPanel?
-    private var detail: NSPanel?
+    private var tab: CodexEdgePanel?
+    private var detail: CodexEdgePanel?
     private var subscriptions: Set<AnyCancellable> = []
     private var screenObserver: NSObjectProtocol?
     private var outsideMonitor: Any?
@@ -22,6 +22,10 @@ final class CodexEdgeWindowController {
     private var menuOpen = false
     private var screensAsleep = false
     private var animationID = 0
+    /// Pointer height and pill center when a drag of a side pill began.
+    private var dragStart: (pointer: CGFloat, tabMidY: CGFloat)?
+    /// Where the pill is being dragged; saved when the drag ends.
+    private var dragPosition: CGFloat?
 
     init(model: AppModel, system: SystemIntegration, preferences: AppPreferences = .shared) {
         self.model = model
@@ -31,10 +35,12 @@ final class CodexEdgeWindowController {
 
     func show() {
         guard tab == nil else { return }
-        tab = makePanel(DockIndicatorContent(model: model, preferences: preferences, displayScale: displayScale, onOpen: { [weak self] in
+        let pill = makePanel(DockIndicatorContent(model: model, preferences: preferences, displayScale: displayScale, onOpen: { [weak self] in
             self?.togglePulse()
         }))
-        tab?.title = "Codex Usage Tab"
+        pill.title = "Codex Usage Tab"
+        pill.onDrag = { [weak self] phase in self?.dragPill(phase) }
+        tab = pill
         detail = makePanel(CodexPanelContent(model: model, preferences: preferences, displayScale: displayScale, navigation: navigation, system: system, onClose: { [weak self] in
             self?.model.closePulse()
         }))
@@ -140,15 +146,19 @@ final class CodexEdgeWindowController {
         let geometry = EdgeWindowGeometry.resolve(
             screen: screen.frame, visible: screen.visibleFrame,
             requestedScale: preferences.scale, backingScale: screen.backingScaleFactor,
-            position: preferences.position, topInset: screen.safeAreaInsets.top,
+            position: preferences.position,
+            verticalPosition: dragPosition ?? CGFloat(preferences.verticalPosition),
+            topInset: screen.safeAreaInsets.top,
             notchFrame: notch.hasHardwareNotch ? notch.notchFrame : nil,
             detailHeight: CodexEdgeLayout.envelopeHeight(model: model)
         )
         // Periodic usage refreshes also land here; only re-run the indicator
         // animation when its frame moved or it is missing from the screen.
-        let needsIndicatorLayout = self.geometry?.tab != geometry.tab
-            || (visibility.isVisible && tab?.isVisible != true)
+        // A drag moves the frame directly, without it.
+        let needsIndicatorLayout = dragStart == nil
+            && (self.geometry?.tab != geometry.tab || (visibility.isVisible && tab?.isVisible != true))
         self.geometry = geometry
+        tab?.dragsAlongEdge = preferences.position != .top
         displayScale.value = geometry.scale
         displayScale.topWidth = geometry.tab.width / geometry.scale
         displayScale.topOverlap = geometry.topOverlap / geometry.scale
@@ -226,7 +236,8 @@ final class CodexEdgeWindowController {
     private func pollVisibility() {
         guard let geometry else { return }
         let pointer = NSEvent.mouseLocation
-        let active = geometry.activation.contains(pointer) || (model.isPulseOpen && visibleDetailFrame?.contains(pointer) == true)
+        let active = dragStart != nil || geometry.activation.contains(pointer)
+            || (model.isPulseOpen && visibleDetailFrame?.contains(pointer) == true)
         let visible = visibility.update(autoHide: preferences.autoHide, pointerActive: active,
                                         pinned: isPinned, menuOpen: menuOpen,
                                         now: ProcessInfo.processInfo.systemUptime)
@@ -260,6 +271,27 @@ final class CodexEdgeWindowController {
                 guard let self, self.animationID == currentID, !visible else { return }
                 self.tab?.orderOut(nil)
             }
+        }
+    }
+
+    /// Moves a side pill along its edge with the pointer; the spot is saved
+    /// when the drag ends. The panel closes so it never trails behind.
+    private func dragPill(_ phase: PillDrag) {
+        guard let geometry else { return }
+        let pointer = NSEvent.mouseLocation.y
+        switch phase {
+        case .began:
+            dragStart = (pointer: pointer, tabMidY: geometry.tab.midY)
+            model.closePulse()
+        case .moved:
+            guard let dragStart else { return }
+            dragPosition = geometry.verticalPosition(tabCenterY: dragStart.tabMidY + pointer - dragStart.pointer)
+            refreshLayout()
+        case .ended:
+            if let dragPosition { preferences.verticalPosition = Double(geometry.dropped(at: dragPosition)) }
+            dragStart = nil
+            dragPosition = nil
+            refreshLayout()
         }
     }
 
@@ -311,7 +343,7 @@ final class CodexEdgeWindowController {
         }
     }
 
-    private func makePanel<Content: View>(_ content: Content) -> NSPanel {
+    private func makePanel<Content: View>(_ content: Content) -> CodexEdgePanel {
         let panel = CodexEdgePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -326,7 +358,54 @@ final class CodexEdgeWindowController {
     }
 }
 
+/// The part of a pill drag its window reports.
+private enum PillDrag { case began, moved, ended }
+
 private final class CodexEdgePanel: NSPanel {
+    /// On the pill's window at a side edge: a press that moves a few points
+    /// drags the pill along the edge instead of clicking it.
+    var dragsAlongEdge = false
+    var onDrag: ((PillDrag) -> Void)?
+    private var pressLocation: NSPoint?
+    private var isDragging = false
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        guard let onDrag else { return super.sendEvent(event) }
+        let pointer = NSEvent.mouseLocation
+        switch event.type {
+        case .leftMouseDown:
+            pressLocation = pointer
+        case .leftMouseDragged where isDragging:
+            onDrag(.moved)
+            return
+        case .leftMouseDragged:
+            if dragsAlongEdge, let press = pressLocation, hypot(pointer.x - press.x, pointer.y - press.y) > 4 {
+                isDragging = true
+                onDrag(.began)
+                onDrag(.moved)
+                return
+            }
+        case .leftMouseUp where isDragging:
+            isDragging = false
+            pressLocation = nil
+            onDrag(.ended)
+            // Release the button away from it, so it cancels instead of
+            // opening the panel.
+            if let cancel = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: -10_000, y: -10_000),
+                                               modifierFlags: event.modifierFlags, timestamp: event.timestamp,
+                                               windowNumber: event.windowNumber, context: nil,
+                                               eventNumber: event.eventNumber, clickCount: event.clickCount, pressure: 0) {
+                super.sendEvent(cancel)
+            }
+            return
+        case .leftMouseUp:
+            pressLocation = nil
+        default:
+            break
+        }
+        super.sendEvent(event)
+    }
 }

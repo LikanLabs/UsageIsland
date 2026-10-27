@@ -204,6 +204,7 @@ enum ResilienceScenarios {
 
     static func screenGeometry() throws {
         try adaptiveNotchGeometry()
+        try draggedSidePills()
         let screens = [
             CGRect(x: 0, y: 0, width: 1512, height: 982),
             CGRect(x: -1920, y: 0, width: 1920, height: 1080),
@@ -264,6 +265,44 @@ enum ResilienceScenarios {
                 }
             }
         }
+    }
+
+    /// A side pill dragged along its edge stays in the usable area, and its
+    /// panel follows it until it meets the top or bottom.
+    private static func draggedSidePills() throws {
+        let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        // The menu bar above and the Dock below.
+        let visible = CGRect(x: 0, y: 70, width: 1512, height: 879)
+        let slack = visible.insetBy(dx: 0, dy: -0.5)
+        for position in [EdgePosition.left, .right] {
+            for scale in [0.75, 1.0, 1.5] {
+                for along in [0.0, 0.2, 0.5, 0.8, 1.0] {
+                    let result = EdgeWindowGeometry.resolve(screen: screen, visible: visible, requestedScale: scale,
+                                                            backingScale: 2, position: position, verticalPosition: along)
+                    try check(slack.contains(result.tab) && slack.contains(result.detail), "a moved pill and its panel stay in the usable area")
+                    let expected = visible.minY + result.tab.height / 2 + (visible.height - result.tab.height) * along
+                    try check(abs(result.tab.midY - expected) <= 0.5, "the pill sits where it was dragged")
+                    try check(abs(result.verticalPosition(tabCenterY: result.tab.midY) - along) < 0.01, "a dragged spot reads back")
+                    let follows = abs(result.detail.midY - result.tab.midY) <= 0.5
+                    let meetsEdge = abs(result.detail.minY - visible.minY) <= 0.5 || abs(result.detail.maxY - visible.maxY) <= 0.5
+                    try check(follows || meetsEdge, "the panel follows the pill until it meets an edge")
+                    try check(abs(result.activation.midY - result.tab.midY) <= 0.5, "auto-hide reveals the pill where it is")
+                }
+            }
+        }
+        let centered = EdgeWindowGeometry.resolve(screen: screen, visible: visible, requestedScale: 1, backingScale: 2)
+        try check(abs(centered.tab.midY - visible.midY) <= 0.5, "side pills start centered")
+        let nearMiddle = centered.verticalPosition(tabCenterY: visible.midY + EdgeWindowGeometry.centerSnap - 1)
+        try check(nearMiddle > 0.5 && centered.dropped(at: nearMiddle) == 0.5, "a pill follows the pointer and, dropped near the middle, is centered")
+        try check(centered.dropped(at: 0.8) == 0.8, "a pill dropped elsewhere stays there")
+        let invalid = EdgeWindowGeometry.resolve(screen: screen, visible: visible, requestedScale: 1, backingScale: 2, verticalPosition: .nan)
+        try check(invalid.tab == centered.tab, "an invalid stored spot falls back to the center")
+        let notch = CGRect(x: screen.midX - 95, y: screen.maxY - 32, width: 190, height: 32)
+        let moved = EdgeWindowGeometry.resolve(screen: screen, visible: visible, requestedScale: 1, backingScale: 2,
+                                               position: .top, verticalPosition: 0, topInset: 32, notchFrame: notch)
+        let atNotch = EdgeWindowGeometry.resolve(screen: screen, visible: visible, requestedScale: 1, backingScale: 2,
+                                                 position: .top, topInset: 32, notchFrame: notch)
+        try check(moved.tab == atNotch.tab && moved.detail == atNotch.detail, "the notch pill ignores the side spot")
     }
 
     private static func adaptiveNotchGeometry() throws {

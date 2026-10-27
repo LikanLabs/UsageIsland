@@ -15,6 +15,25 @@ struct EdgeWindowGeometry {
     let activation: CGRect
     /// Physical points, independent of the user's content scale.
     let topOverlap: CGFloat
+    /// The part of the screen a side pill moves along.
+    let usable: CGRect
+
+    /// How close to the middle a dropped side pill snaps back to it.
+    static let centerSnap: CGFloat = 24
+
+    /// The side position (0 at the bottom, 1 at the top) that puts the pill's
+    /// center at `centerY`.
+    func verticalPosition(tabCenterY centerY: CGFloat) -> CGFloat {
+        let travel = usable.height - tab.height
+        guard travel > 0 else { return 0.5 }
+        return min(1, max(0, (centerY - usable.minY - tab.height / 2) / travel))
+    }
+
+    /// Where a side pill dropped at `position` stays: near the middle it is
+    /// the middle, so a pill dragged back is centered again.
+    func dropped(at position: CGFloat) -> CGFloat {
+        abs(position - 0.5) * max(0, usable.height - tab.height) <= Self.centerSnap ? 0.5 : position
+    }
 
     func visibleDetail(height: CGFloat, position: EdgePosition) -> CGRect {
         let height = min(detail.height, height * scale)
@@ -25,6 +44,7 @@ struct EdgeWindowGeometry {
 
     static func resolve(screen: CGRect, visible: CGRect, requestedScale: CGFloat,
                         backingScale: CGFloat, position: EdgePosition = .right,
+                        verticalPosition: CGFloat = 0.5,
                         topInset: CGFloat = 0, notchFrame: CGRect? = nil,
                         detailHeight: CGFloat = CodexEdgeLayout.detailHeight) -> Self {
         let bounds = screen.intersection(visible)
@@ -35,13 +55,21 @@ struct EdgeWindowGeometry {
         let availableHeight = position == .top ? topAnchor - usable.minY : usable.height
         let scale = min(preferred, max(1, screen.width) / baseWidth,
                         max(1, availableHeight) / (detailHeight + (position == .top ? CodexEdgeLayout.topHeight + CodexEdgeLayout.gap : 0)))
-        let centerY = usable.midY
+        // A side pill sits where it was dragged, centered by default; the
+        // panel stays beside it until it meets the top or bottom.
+        let tabHeight = CodexEdgeLayout.tabHeight * scale
+        let along = verticalPosition.isFinite ? min(1, max(0, verticalPosition)) : 0.5
+        let tabCenterY = usable.height > tabHeight
+            ? usable.minY + tabHeight / 2 + (usable.height - tabHeight) * along
+            : usable.midY
+        let detailHalf = detailHeight * scale / 2
+        let detailCenterY = min(max(tabCenterY, usable.minY + detailHalf), usable.maxY - detailHalf)
         var tab = CGRect(x: screen.maxX - CodexEdgeLayout.tabWidth * scale,
-                         y: centerY - CodexEdgeLayout.tabHeight * scale / 2,
+                         y: tabCenterY - tabHeight / 2,
                          width: CodexEdgeLayout.tabWidth * scale,
-                         height: CodexEdgeLayout.tabHeight * scale)
+                         height: tabHeight)
         var detail = CGRect(x: tab.minX - (CodexEdgeLayout.detailWidth + CodexEdgeLayout.gap) * scale,
-                            y: centerY - detailHeight * scale / 2,
+                            y: detailCenterY - detailHalf,
                             width: CodexEdgeLayout.detailWidth * scale,
                             height: detailHeight * scale)
         var topOverlap: CGFloat = 0
@@ -71,7 +99,8 @@ struct EdgeWindowGeometry {
         case .right: activation = CGRect(x: tab.minX, y: tab.minY - 10, width: screen.maxX - tab.minX, height: tab.height + 20)
         case .top: activation = CGRect(x: tab.minX, y: tab.minY, width: tab.width, height: screen.maxY - tab.minY)
         }
-        return Self(scale: scale, tab: aligned(tab, backingScale), detail: aligned(detail, backingScale), activation: activation, topOverlap: topOverlap)
+        return Self(scale: scale, tab: aligned(tab, backingScale), detail: aligned(detail, backingScale),
+                    activation: activation, topOverlap: topOverlap, usable: usable)
     }
 
     private static func aligned(_ rect: CGRect, _ backingScale: CGFloat) -> CGRect {

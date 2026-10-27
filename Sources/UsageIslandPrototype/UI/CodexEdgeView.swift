@@ -123,7 +123,10 @@ struct CodexEdgeView: View {
         .accessibilityLabel(accessibilitySummary)
         .accessibilityValue(model.isPulseOpen ? preferences.text("Details open", "Detalle abierto") : preferences.text("Details closed", "Detalle cerrado"))
         .accessibilityHint(snapshot?.freshness == .stale ? preferences.text("Last known usage. Update pending.", "Último consumo conocido. Pendiente de actualizar.") : "")
-        .help(preferences.text("Click to open and refresh usage", "Haz clic para abrir y actualizar el consumo"))
+        .help(atNotch
+              ? preferences.text("Click to open and refresh usage", "Haz clic para abrir y actualizar el consumo")
+              : preferences.text("Click to open and refresh usage. Drag it to move it up or down.",
+                                 "Haz clic para abrir y actualizar el consumo. Arrástrala para subirla o bajarla."))
         .contextMenu {
             Button(preferences.text("Refresh usage", "Actualizar consumo")) { Task { await model.refreshUsage() } }
                 .disabled(model.connectionStates.values.contains(.connecting))

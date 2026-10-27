@@ -1,3 +1,30 @@
+# Validation — 2026-10-27 (side pill dragged along its edge)
+
+- At the user's request, a pill on the left or right edge moves up or down
+  when dragged. A press that moves more than 4 points drags it; a plain click
+  still opens the panel. The spot is saved as `appearance.verticalPosition`
+  (0 bottom, 1 top, default 0.5) for both sides; the notch pill ignores it.
+  The panel opens beside the pill and stops at the top or bottom of the
+  usable area. Auto-hide keeps the pill shown during a drag and reveals it
+  where it is. It follows the pointer exactly; dropped within 24 points of
+  the middle, it snaps back to the center.
+- The user tried it by hand in a temporary build (synthetic mouse events
+  need an Accessibility permission this session does not have): drags to the
+  bottom, the top and in between were saved, clicks opened the panel beside
+  the pill, clamped at both ends, and the last drags ended without opening
+  it. Afterwards the center snap was widened from 6 to 24 points (a drop
+  about 40 points from the middle had not snapped) and moved to the drop, so
+  the pill no longer sticks while passing the middle.
+- `swift test`: 303 tests pass; `./Scripts/verify-resilience.sh` passes,
+  including 30 new dragged side-pill cases.
+
+# Validation — 2026-10-27 (release 0.1.18)
+
+- Every release step passed. The ZIP's SHA-256 matches the tap's cask, the
+  ticket is stapled, `spctl` reports "accepted, source=Notarized Developer
+  ID", and the app relaunched itself into 0.1.18 after `brew upgrade`,
+  showing "69%" over "1h 33m".
+
 # Validation — 2026-10-27 (pill counts down to a full limit)
 
 - At the user's request, the caption under the pill's percentage shows the

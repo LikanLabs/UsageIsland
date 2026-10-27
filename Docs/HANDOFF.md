@@ -25,6 +25,9 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
   falta para que su límite vuelva al 100 % (por ejemplo «1h 48m») en lugar de
   «5 horas». El nombre del límite queda solo mientras no hay nada usado o no
   se conoce el reinicio.
+- El mismo día pidió poder subir y bajar la pill en los bordes laterales: se
+  arrastra, la posición se guarda (`appearance.verticalPosition`) y el panel
+  se abre a su lado sin salirse de la pantalla. En el notch no cambia nada.
 
 ## Estado implementado
 

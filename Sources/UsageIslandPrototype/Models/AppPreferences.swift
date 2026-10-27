@@ -30,6 +30,15 @@ final class AppPreferences: ObservableObject {
     @Published var position: EdgePosition {
         didSet { defaults.set(position.rawValue, forKey: "appearance.position") }
     }
+    /// Where a side pill sits along its edge, from 0 at the bottom to 1 at
+    /// the top; it starts centered and moves when the pill is dragged.
+    @Published var verticalPosition: Double {
+        didSet {
+            let valid = Self.validVerticalPosition(verticalPosition)
+            if verticalPosition != valid { verticalPosition = valid }
+            defaults.set(valid, forKey: "appearance.verticalPosition")
+        }
+    }
     @Published var autoHide: Bool {
         didSet { defaults.set(autoHide, forKey: "appearance.autoHide") }
     }
@@ -51,6 +60,7 @@ final class AppPreferences: ObservableObject {
         scale = Self.validScale(defaults.object(forKey: "appearance.scale") as? Double ?? 1)
         language = AppLanguage(rawValue: defaults.string(forKey: "appearance.language") ?? "") ?? .system
         position = EdgePosition(rawValue: defaults.string(forKey: "appearance.position") ?? "") ?? .right
+        verticalPosition = Self.validVerticalPosition(defaults.object(forKey: "appearance.verticalPosition") as? Double ?? 0.5)
         autoHide = defaults.bool(forKey: "appearance.autoHide")
         // New installs show what is left, matching the ring and the alerts.
         showsConsumedPercent = defaults.object(forKey: "appearance.showsConsumedPercent") as? Bool ?? false
@@ -78,5 +88,9 @@ final class AppPreferences: ObservableObject {
 
     private static func validScale(_ value: Double) -> Double {
         value.isFinite ? min(max(value, scaleRange.lowerBound), scaleRange.upperBound) : 1
+    }
+
+    private static func validVerticalPosition(_ value: Double) -> Double {
+        value.isFinite ? min(max(value, 0), 1) : 0.5
     }
 }

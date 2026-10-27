@@ -24,7 +24,7 @@ struct VerifyResilience {
         try await ResilienceScenarios.sleepWakeAndPolling()
         print("PASS: sleep/wake notifications pause and resume polling")
         try ResilienceScenarios.screenGeometry()
-        print("PASS: 768 layout cases plus 30 adaptive-notch camera-occlusion regression cases")
+        print("PASS: 768 layout cases, 30 dragged side-pill cases and 30 adaptive-notch camera-occlusion regression cases")
         try ResilienceScenarios.dockVisibility()
         print("PASS: auto-hide delay, reveal, pinned details, menus and fixed mode")
     }

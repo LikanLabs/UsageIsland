@@ -95,6 +95,7 @@ itself (it waits if the panel is open).
 | Action | What happens |
 | --- | --- |
 | Click the pill | Opens the panel with every tool's usage and refreshes it |
+| Drag the pill up or down | On the left or right edge, moves it; it stays where you leave it, and the panel opens beside it |
 | Refresh button | Updates now |
 | Gear | Settings: position, auto-hide, available or used %, language, size, open at login, alerts |
 | Right-click the pill | Refresh or quit |
