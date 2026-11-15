@@ -197,9 +197,7 @@ final class UsageAlertMonitorTests: XCTestCase {
     }
 
     private func makePreferences() throws -> AppPreferences {
-        let suite = "UsageIsland.alerts.tests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let defaults = TestDefaults.make()
         return AppPreferences(defaults: defaults)
     }
 }

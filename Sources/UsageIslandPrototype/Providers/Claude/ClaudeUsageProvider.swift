@@ -47,6 +47,13 @@ actor ClaudeUsageProvider: UsageProvider {
     /// which reaches Claude's usage service.
     private let limitsRefreshInterval: TimeInterval
     private var lastLimitsRefresh: Date?
+    /// How often the sign-in end date is read again once Claude Code has
+    /// reported one, and how often it is looked for while it has not (older
+    /// versions never report it).
+    private let signInCheckInterval: TimeInterval
+    private let signInRecheckInterval: TimeInterval
+    private var lastSignInCheck: Date?
+    private var signInExpiresAt: Date?
     private let makeQuery: @Sendable () -> (any ClaudeUsageQuerying)?
     private var lastQueryAttempt: Date?
     private var queried: (limits: ClaudeUsageResponseParser.Limits, capturedAt: Date)?
@@ -60,6 +67,8 @@ actor ClaudeUsageProvider: UsageProvider {
         queryInterval: TimeInterval = 300,
         maximumBackoff: TimeInterval = 3_600,
         limitsRefreshInterval: TimeInterval = 20 * 60,
+        signInCheckInterval: TimeInterval = 3_600,
+        signInRecheckInterval: TimeInterval = 86_400,
         makeQuery: @escaping @Sendable () -> (any ClaudeUsageQuerying)? = { nil }
     ) {
         self.clock = clock
@@ -67,6 +76,8 @@ actor ClaudeUsageProvider: UsageProvider {
         self.queryInterval = queryInterval
         self.maximumBackoff = max(queryInterval, maximumBackoff)
         self.limitsRefreshInterval = limitsRefreshInterval
+        self.signInCheckInterval = signInCheckInterval
+        self.signInRecheckInterval = signInRecheckInterval
         self.makeQuery = makeQuery
     }
 
@@ -78,13 +89,15 @@ actor ClaudeUsageProvider: UsageProvider {
     func fetchUsage() async throws -> UsageSnapshot {
         await refreshQueryIfDue()
         guard let queried else { throw lastQueryError ?? ClaudeUsageError.notConnected }
-        return try Self.snapshot(
+        var snapshot = try Self.snapshot(
             windows: queried.limits.windows,
             capturedAt: queried.capturedAt,
             lastActivityAt: nil,
             now: clock.now(),
             freshnessInterval: freshnessInterval
         )
+        snapshot.signInExpiresAt = signInExpiresAt
+        return snapshot
     }
 
     private func refreshQueryIfDue() async {
@@ -109,6 +122,9 @@ actor ClaudeUsageProvider: UsageProvider {
                     limits = try ClaudeUsageResponseParser.limits(from: await query.queryUsage())
                 }
                 self.store(limits)
+                if self.signInCheckIsDue() {
+                    self.noteSignInExpiry((try? await query.authStatus()).flatMap(ClaudeAuthStatusParser.signInExpiry))
+                }
             } catch ClaudeUsageResponseParser.Failure.limitsUnavailable {
                 // A signed-out Claude Code also answers "no plan limits".
                 if let status = try? await query.authStatus(), ClaudeAuthStatusParser.isSignedOut(status) {
@@ -135,6 +151,19 @@ actor ClaudeUsageProvider: UsageProvider {
     /// each failed answer in a row, capped at `maximumBackoff`.
     var currentWait: TimeInterval {
         min(queryInterval * pow(2, Double(min(consecutiveFailures, 10))), maximumBackoff)
+    }
+
+    /// Asked only after a good reading, so a signed-in Claude Code is the
+    /// one answering.
+    private func signInCheckIsDue() -> Bool {
+        guard let lastSignInCheck else { return true }
+        let interval = signInExpiresAt == nil ? signInRecheckInterval : signInCheckInterval
+        return clock.now().timeIntervalSince(lastSignInCheck) >= interval
+    }
+
+    private func noteSignInExpiry(_ date: Date?) {
+        lastSignInCheck = clock.now()
+        signInExpiresAt = date
     }
 
     private func mayRefreshLimits() -> Bool {

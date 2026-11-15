@@ -214,6 +214,9 @@ struct CodexRateLimitSnapshot: Sendable {
     let planType: CodexPlanType?
     /// Backend display name for a separate limit bucket, when supplied.
     let limitName: String?
+    /// A workspace stop the windows do not show; nil for an ordinary
+    /// reached limit, which the windows already show, and for unknown values.
+    let block: UsageBlock?
 
     init(validating value: JSONValue) throws {
         guard case .object(let object) = value else {
@@ -224,6 +227,17 @@ struct CodexRateLimitSnapshot: Sendable {
             limitName = trimmed.isEmpty ? nil : String(trimmed.prefix(24))
         } else {
             limitName = nil
+        }
+
+        switch object["rateLimitReachedType"] {
+        case .some(.string("workspace_owner_credits_depleted")),
+             .some(.string("workspace_member_credits_depleted")):
+            block = .workspaceCreditsDepleted
+        case .some(.string("workspace_owner_usage_limit_reached")),
+             .some(.string("workspace_member_usage_limit_reached")):
+            block = .workspaceLimitReached
+        default:
+            block = nil
         }
 
         switch object["planType"] {
@@ -253,12 +267,16 @@ struct CodexRateLimitsResponse: Sendable {
     /// Other named buckets (for example a separate limit for some models),
     /// ordered by bucket id. Malformed or unnamed buckets are skipped.
     let additionalBuckets: [(name: String, windows: [CodexRateLimitWindow])]
+    /// Resets the account can still redeem. Optional extra: anything
+    /// unexpected here reads as "none" and never fails the limits.
+    let savedResets: SavedResets?
 
     init(validating value: JSONValue) throws {
         guard case .object(let object) = value else {
             throw CodexUsageError.invalidRateLimitResponse
         }
 
+        savedResets = Self.savedResets(object["rateLimitResetCredits"])
         additionalBuckets = Self.namedBuckets(object["rateLimitsByLimitId"])
         if let bucketsValue = object["rateLimitsByLimitId"],
            bucketsValue != .null {
@@ -305,6 +323,28 @@ struct CodexRateLimitsResponse: Sendable {
 
     var planType: CodexPlanType? {
         selectedSnapshot.planType
+    }
+
+    var block: UsageBlock? {
+        selectedSnapshot.block
+    }
+
+    /// `availableCount` is the number; the detail rows, when present, give
+    /// the earliest expiry among the credits still available.
+    private static func savedResets(_ value: JSONValue?) -> SavedResets? {
+        guard case .object(let summary) = value,
+              case .integer(let count) = summary["availableCount"], count > 0 else { return nil }
+        var expiries: [Date] = []
+        if case .array(let credits) = summary["credits"] {
+            for credit in credits {
+                guard case .object(let credit) = credit,
+                      credit["status"] == .string("available"),
+                      case .integer(let seconds) = credit["expiresAt"],
+                      seconds > 0, seconds <= 253_402_300_799 else { continue }
+                expiries.append(Date(timeIntervalSince1970: TimeInterval(seconds)))
+            }
+        }
+        return SavedResets(count: Int(min(count, 99)), nextExpiry: expiries.min())
     }
 }
 

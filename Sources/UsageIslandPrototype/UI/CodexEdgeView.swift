@@ -49,12 +49,30 @@ enum CodexEdgeLayout {
     /// The "will it last?" line, shown only while there is recent use.
     static let forecastLineHeight: CGFloat = 24
 
+    /// One-line notes under a card's gauges: things the provider reports
+    /// that no gauge shows.
+    enum CardNote: Hashable {
+        case block(UsageBlock)
+        case signInEnding(Date)
+        case savedResets(SavedResets)
+    }
+
+    static func cardNotes(_ snapshot: UsageSnapshot, now: Date) -> [CardNote] {
+        var notes: [CardNote] = []
+        if let block = snapshot.block { notes.append(.block(block)) }
+        if let end = snapshot.signInEnding(at: now) { notes.append(.signInEnding(end)) }
+        if let resets = snapshot.savedResets { notes.append(.savedResets(resets)) }
+        return notes
+    }
+
     /// Height of one provider card, including its padding and header.
-    static func cardHeight(provider: ProviderID, snapshot: UsageSnapshot?, hasForecast: Bool = false) -> CGFloat {
+    static func cardHeight(provider: ProviderID, snapshot: UsageSnapshot?, hasForecast: Bool = false,
+                           now: Date = Date()) -> CGFloat {
         guard let snapshot else { return cardChrome + 44 }
         return cardChrome + CGFloat(gaugeRows(snapshot).count) * gaugesHeight
             + (snapshot.freshness == .stale ? staleNoteHeight : 0)
             + (hasForecast ? forecastLineHeight : 0)
+            + CGFloat(cardNotes(snapshot, now: now).count) * forecastLineHeight
     }
 
     static let welcomeCardHeight: CGFloat = 146
@@ -469,6 +487,9 @@ struct CodexUsageDetailView: View {
                 if let forecast = model.forecast(for: provider) {
                     forecastLine(forecast)
                 }
+                ForEach(CodexEdgeLayout.cardNotes(snapshot, now: now), id: \.self) { note in
+                    noteLine(note, now: now)
+                }
                 if snapshot.freshness == .stale, model.issues[provider] == .notSignedIn {
                     // An expired sign-in explains why the reading stopped.
                     Label(Self.signInHint(provider, preferences: preferences), systemImage: "person.crop.circle.badge.exclamationmark")
@@ -490,7 +511,7 @@ struct CodexUsageDetailView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: CodexEdgeLayout.cardHeight(provider: provider, snapshot: snapshot,
-                                                  hasForecast: model.forecast(for: provider) != nil), alignment: .top)
+                                                  hasForecast: model.forecast(for: provider) != nil, now: now), alignment: .top)
         .background(IslandPalette.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(IslandPalette.cardEdge, lineWidth: 0.5))
     }
@@ -515,6 +536,21 @@ struct CodexUsageDetailView: View {
             .help(preferences.text("Estimate from your recent usage; the official limit is the percentage above.",
                                    "Estimación según tu consumo reciente; el límite oficial es el porcentaje de arriba."))
             .accessibilityLabel(preferences.text("Estimate. ", "Estimación. ") + text)
+    }
+
+    /// Something the provider reports that no gauge shows, in one line.
+    private func noteLine(_ note: CodexEdgeLayout.CardNote, now: Date) -> some View {
+        let symbol: String
+        let warning: Bool
+        switch note {
+        case .block: (symbol, warning) = ("exclamationmark.triangle", true)
+        case .signInEnding: (symbol, warning) = ("person.crop.circle.badge.clock", true)
+        case .savedResets: (symbol, warning) = ("arrow.counterclockwise.circle", false)
+        }
+        return Label(CodexEdgeText.noteText(note, now: now, preferences: preferences), systemImage: symbol)
+            .font(.system(size: 11)).foregroundStyle(warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            .lineLimit(1).minimumScaleFactor(0.75)
+            .frame(height: CodexEdgeLayout.forecastLineHeight - 10)
     }
 
     /// Shown when neither CLI is installed: what the app needs, in one card.
@@ -698,6 +734,29 @@ enum CodexEdgeText {
             return date.formatted(.dateTime.hour().minute().locale(preferences.locale))
         }
         return date.formatted(.dateTime.weekday(.abbreviated).hour().minute().locale(preferences.locale))
+    }
+
+    /// "3 saved resets · next one expires Nov 30", "Your sign-in ends in
+    /// 2d 4h: run claude auth login", or the workspace stop.
+    static func noteText(_ note: CodexEdgeLayout.CardNote, now: Date, preferences: AppPreferences) -> String {
+        switch note {
+        case .block(.workspaceCreditsDepleted):
+            return preferences.text("Your workspace is out of credits", "Tu espacio de trabajo se quedó sin créditos")
+        case .block(.workspaceLimitReached):
+            return preferences.text("Your workspace reached its usage limit", "Tu espacio de trabajo alcanzó su límite de uso")
+        case .signInEnding(let date):
+            let left = countdown(until: date, now: now)
+            return preferences.text("Your sign-in ends in \(left): run claude auth login",
+                                    "Tu sesión vence en \(left): ejecuta claude auth login")
+        case .savedResets(let resets):
+            let one = resets.count == 1
+            let count = preferences.text(one ? "1 saved reset" : "\(resets.count) saved resets",
+                                         one ? "1 reinicio guardado" : "\(resets.count) reinicios guardados")
+            guard let expiry = resets.nextExpiry, expiry > now else { return count }
+            let day = expiry.formatted(.dateTime.day().month(.abbreviated).locale(preferences.locale))
+            return count + " · " + preferences.text(one ? "expires \(day)" : "next one expires \(day)",
+                                                    one ? "vence el \(day)" : "el próximo vence el \(day)")
+        }
     }
 
     /// Compact time left: "45 min", "1h 20m", "2d 4h".

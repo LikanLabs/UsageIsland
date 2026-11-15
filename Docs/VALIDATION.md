@@ -1,3 +1,32 @@
+# Validation — 2026-11-15 (card notes, CLI watch, test settings)
+
+- At the user's request ("avanza con la 0.1.20"), provider cards gained
+  one-line notes for what the CLIs report besides the windows: Codex's saved
+  resets with the next expiry, a Codex workspace stop, and the end of the
+  Claude Code sign-in during its last three days. Each note adds one 24-point
+  line to its card, like the forecast.
+- Real data, installed CLIs (Codex 0.153.4, Claude Code 2.1.325): Codex
+  answered `rateLimitResetCredits` with `availableCount` 3 and three
+  `available` credits; a temporary build showed "3 reinicios guardados · el
+  próximo vence el 30 nov" on the Codex card. `claude auth status --json`
+  answered `loginExpiresAt` eight days ahead, so the sign-in note was not on
+  screen; it and the workspace stop are covered by synthetic tests only.
+  Claude Code 2.1.325 answered `get_usage` in the shape the app parses.
+- `Scripts/check-cli-compatibility.sh` passes against the installed CLIs and
+  fails with 20 findings against a stand-in executable that offers nothing.
+  It was not run locally against freshly downloaded CLIs (this session may
+  not execute them); the daily "CLI watch" workflow does that on GitHub.
+- Tests kept their settings in real `UserDefaults` suites; although each was
+  removed, macOS wrote a preferences file for it afterwards (555 had piled up
+  on this Mac). They now use an in-memory store; a full run leaves none.
+- `swift test`: 315 tests pass; `./Scripts/verify-resilience.sh` passes.
+
+# Validation — 2026-10-27 (release 0.1.19)
+
+- Every release step passed: the tap's cask matches the ZIP, the notarization
+  log reports "source=Notarized Developer ID", and the app relaunched itself
+  into 0.1.19 after `brew upgrade`, with the pill at its saved spot.
+
 # Validation — 2026-10-27 (side pill dragged along its edge)
 
 - At the user's request, a pill on the left or right edge moves up or down

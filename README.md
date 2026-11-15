@@ -124,6 +124,12 @@ estimate from your last half hour: "Session: runs out by 16:40 at this pace",
 or "At this pace it lasts until the reset". It is only an estimate from the
 official percentages; it disappears when you stop.
 
+**Notes.** A card adds a line for what its tool reports besides the rings:
+how many saved Codex resets you have and when the next one expires ("3 saved
+resets · next one expires Nov 30"), a Codex workspace that is out of credits
+or at its own limit, and, during its last three days, when your Claude Code
+sign-in ends, so you can run `claude auth login` before readings stop.
+
 **Alerts.** With **Alert when running low** on (the default), you get a macOS
 notification when a limit drops to 20 %, 10 % and 0 % left, when a limit that
 had run low resets, and when a limit resets well ahead of schedule. When a
@@ -153,7 +159,9 @@ has no fresh limits to report (after a while without using it), the app runs
 the local `/usage` command once to fetch them, at most every 20 minutes. The query runs
 isolated (`--restricted`, no MCP servers, no tools, no saved session), sends
 no prompt and uses no tokens. The numbers come from your account, so they
-include the terminal, the Claude desktop app and claude.ai.
+include the terminal, the Claude desktop app and claude.ai. About once an
+hour it also runs `claude auth status --json` to learn when your sign-in ends
+(Claude Code 2.1.318 or later says so; older versions are asked once a day).
 
 There is nothing to connect: if `codex` or `claude` is installed and signed
 in, Usage Island finds it. If you only use one of them, you only see that one.

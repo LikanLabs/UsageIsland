@@ -191,9 +191,7 @@ final class CodexEdgeTextTests: XCTestCase {
     }
 
     private func makePreferences(_ language: AppLanguage) throws -> AppPreferences {
-        let suite = "UsageIsland.text.tests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let defaults = TestDefaults.make()
         let preferences = AppPreferences(defaults: defaults)
         preferences.language = language
         return preferences

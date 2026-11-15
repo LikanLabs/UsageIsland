@@ -28,6 +28,13 @@ Codex. Distribución por GitHub Releases + Homebrew Cask, sin Mac App Store.
 - El mismo día pidió poder subir y bajar la pill en los bordes laterales: se
   arrastra, la posición se guarda (`appearance.verticalPosition`) y el panel
   se abre a su lado sin salirse de la pantalla. En el notch no cambia nada.
+- El 15 de noviembre aprobó la 0.1.20: una línea en las tarjetas para lo que
+  los CLI informan fuera de los anillos (reinicios guardados de Codex con su
+  vencimiento, bloqueo del espacio de trabajo de Codex, sesión de Claude Code
+  por vencer), una revisión diaria en GitHub de las versiones nuevas de ambos
+  CLI («CLI watch») y pruebas que no dejan archivos de ajustes en el Mac.
+  Quedaron para después: avisos configurables, elegir qué muestra la pill,
+  ritmo semanal, atajo de teclado, historial y widget.
 
 ## Estado implementado
 

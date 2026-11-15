@@ -68,7 +68,7 @@ enum CodexUsageMapper {
         }
 
         do {
-            return try UsageSnapshot(
+            var snapshot = try UsageSnapshot(
                 provider: .codex,
                 preferredWindow: preferredWindow,
                 additionalWindows: additionalWindows,
@@ -77,6 +77,9 @@ enum CodexUsageMapper {
                 isActivelyUsed: false,
                 capturedAt: capturedAt
             )
+            snapshot.savedResets = response.savedResets
+            snapshot.block = response.block
+            return snapshot
         } catch {
             throw CodexUsageError.invalidRateLimitResponse
         }

@@ -161,12 +161,21 @@ private final class TimeoutFlag: @unchecked Sendable {
 enum ClaudeAuthStatusParser {
     private struct Status: Decodable {
         let loggedIn: Bool
+        let loginExpiresAt: String?
     }
 
     /// True only when Claude Code says nobody is signed in. An unreadable
     /// answer is not taken as signed out.
     static func isSignedOut(_ data: Data) -> Bool {
         (try? JSONDecoder().decode(Status.self, from: data))?.loggedIn == false
+    }
+
+    /// When the stored sign-in ends, on Claude Code versions that say so
+    /// (`loginExpiresAt`) and while signed in.
+    static func signInExpiry(_ data: Data) -> Date? {
+        guard let status = try? JSONDecoder().decode(Status.self, from: data), status.loggedIn,
+              let text = status.loginExpiresAt else { return nil }
+        return ClaudeUsageResponseParser.date(text)
     }
 }
 

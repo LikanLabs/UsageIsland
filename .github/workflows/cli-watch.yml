@@ -1,0 +1,52 @@
+name: CLI watch
+
+# Early warning. Codex and Claude Code ship new versions almost daily; this
+# installs the newest of each, without signing in, and checks that they still
+# offer what Usage Island reads. When something is gone the run fails (GitHub
+# emails the maintainer) and an issue is opened, once.
+on:
+  schedule:
+    - cron: "17 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the newest Codex and Claude Code
+        run: npm install --global --no-audit --no-fund @openai/codex@latest @anthropic-ai/claude-code@latest
+      - name: Check what Usage Island reads
+        id: check
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          DISABLE_TELEMETRY: "1"
+          DISABLE_ERROR_REPORTING: "1"
+        run: |
+          set -o pipefail
+          ./Scripts/check-cli-compatibility.sh "$(command -v codex)" "$(command -v claude)" \
+            "$(npm root --global)/@anthropic-ai" | tee report.txt
+      - name: Open an issue
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="A new Codex or Claude Code version changed what Usage Island reads"
+          if [ -n "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')" ]; then
+            exit 0
+          fi
+          {
+            echo "The daily check of the newest CLIs failed: $RUN_URL"
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+          } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md

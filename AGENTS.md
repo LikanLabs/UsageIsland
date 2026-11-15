@@ -40,6 +40,8 @@ Preserve:
   the reset countdown when a limit is used up;
 - the glass panel's dimensions, corner radii, spacing and typography;
 - provider cards, gauge rows, header controls and the in-panel settings page;
+- the one-line notes under a card's gauges (forecast, saved Codex resets,
+  workspace stop, Claude sign-in about to end), added on 2026-11-15;
 - opening, closing and page-transition animations, including Reduce Motion;
 - the geometry in `EdgeWindowGeometry` and `ScreenNotchGeometry`;
 - the app icon (the glass pill), rendered by `Scripts/render-app-icon.swift`.
@@ -120,6 +122,11 @@ synthetic demo providers are outside the product scope.
 
 - Show every window Codex reports: the `codex` bucket first, then other
   buckets of `rateLimitsByLimitId` that carry a `limitName`, labelled with it.
+- Saved resets (`rateLimitResetCredits`: `availableCount`, and the earliest
+  `expiresAt` among `available` credits) and workspace stops
+  (`rateLimitReachedType` values starting with `workspace_`) are optional
+  extras shown as a line on the Codex card. Anything unexpected in them reads
+  as "none" and never fails the limits; the app never redeems a reset.
 
 ## Claude integration rules
 
@@ -144,7 +151,12 @@ synthetic demo providers are outside the product scope.
   most every 20 minutes. Read limits from its ordered `limits` rows, classified
   only by `kind` (`session`, `weekly_all`, `weekly_scoped` with its scope
   name); skip unknown kinds instead of guessing.
-- Store only the rate-limit percentages, reset times and capture time.
+- After a good reading, `claude auth status --json` also gives the date the
+  stored sign-in ends (`loginExpiresAt`, Claude Code 2.1.318 or later). Read
+  it at most once an hour, or once a day while the CLI does not report it;
+  the Claude card says so during the last three days.
+- Store only the rate-limit percentages, reset times, capture time and the
+  date the sign-in ends.
 - Never read Claude credentials, the Keychain, OAuth tokens or private
   endpoints such as `api/oauth/usage`.
 - Do not write to `~/.claude/settings.json`. The only exception is removing
@@ -179,6 +191,14 @@ synthetic demo providers are outside the product scope.
 - Tests must use synthetic fixtures.
 - Browser cookie access is out of scope until explicitly approved.
 - Full Disk Access must not be required for the initial Codex integration.
+
+## CLI watch
+
+`.github/workflows/cli-watch.yml` runs `Scripts/check-cli-compatibility.sh`
+every day against the newest Codex and Claude Code, without signing in, and
+opens an issue when either stops offering something the app reads. When a
+provider adapter starts reading a new field, flag or request, add it to that
+script.
 
 ## Development workflow
 

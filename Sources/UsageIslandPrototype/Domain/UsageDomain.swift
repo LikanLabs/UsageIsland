@@ -155,6 +155,27 @@ public struct UsageWindow: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Limit resets the provider says the user holds and can still redeem.
+public struct SavedResets: Hashable, Sendable {
+    public let count: Int
+    /// When the first of them expires, if the provider says.
+    public let nextExpiry: Date?
+
+    public init?(count: Int, nextExpiry: Date?) {
+        guard count > 0 else { return nil }
+        self.count = min(count, 99)
+        self.nextExpiry = nextExpiry
+    }
+}
+
+/// A stop the provider reports that no usage window shows.
+public enum UsageBlock: Hashable, Sendable {
+    /// The shared workspace has no credits left.
+    case workspaceCreditsDepleted
+    /// The shared workspace reached its own usage limit.
+    case workspaceLimitReached
+}
+
 public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     public var provider: ProviderID
     /// When the provider last observed the user consuming quota, if it can
@@ -166,8 +187,25 @@ public struct UsageSnapshot: Identifiable, Equatable, Sendable {
     public var freshness: DataFreshness
     public var isActivelyUsed: Bool
     public var capturedAt: Date
+    /// Resets the user can still redeem, as reported by the provider.
+    public var savedResets: SavedResets?
+    /// A stop outside the usage windows, as reported by the provider.
+    public var block: UsageBlock?
+    /// When the provider's stored sign-in ends, if it says.
+    public var signInExpiresAt: Date?
 
     public var id: ProviderID { provider }
+
+    /// How long before the sign-in ends the card starts saying so.
+    public static let signInWarningInterval: TimeInterval = 3 * 86_400
+
+    /// The end of the sign-in once it is near, so the user can sign in
+    /// again before readings stop. Nil when far away, unknown or past.
+    public func signInEnding(at now: Date) -> Date? {
+        guard let signInExpiresAt, signInExpiresAt > now,
+              signInExpiresAt.timeIntervalSince(now) <= Self.signInWarningInterval else { return nil }
+        return signInExpiresAt
+    }
 
     public var windows: [UsageWindow] {
         [preferredWindow] + additionalWindows
