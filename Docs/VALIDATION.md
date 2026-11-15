@@ -1,3 +1,14 @@
+# Validation — 2026-11-15 (release 0.1.20)
+
+- The first two release runs stopped at notarization: Apple answered 403, "A
+  required agreement is missing or has expired". After the user accepted the
+  agreement in the developer account, a re-run a few minutes later passed
+  every step; nothing had been published in between.
+- The tap's cask matches the ZIP, `spctl` reports "source=Notarized Developer
+  ID", and the app relaunched itself into 0.1.20 after `brew upgrade`.
+- The "CLI watch" workflow ran once by hand on GitHub and passed against
+  Codex 0.169.0 and Claude Code 2.1.325, the newest of that day.
+
 # Validation — 2026-11-15 (card notes, CLI watch, test settings)
 
 - At the user's request ("avanza con la 0.1.20"), provider cards gained
